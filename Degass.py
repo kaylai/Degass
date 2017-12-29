@@ -1,106 +1,127 @@
 from math import *
+from scipy.optimize import fsolve
+import numpy as np
+import pandas
+
 
 ##-----------------USER INPUTS---------------##
 #MELT INCLUSION WT% AS (H2O, CO2, S)
 #Temp in degrees celsius
 #Press in bars
 
-sample = "erebus"
+###############user settings
+sample = "poas"
+modeltype = 3
+lowP = 1 #for modeltype2, in bars
+dQFMvalue = 0 #for modeltype 2, need to know fO2 pegged to QFM buffer
+verbose = False #set to true to print out debugging statements
 
-if sample == "poas":
-	MeltInclusion_deep_thermo = 	{	"press": 2000, #bars
-										"temp": 1000, #celcius
-										"logfO2": -10.804261, #absolute logfO2 value #POAS is QFM
-										"XCO2": 0.1701, #calculated with magmasat
-										"X_Sum": 0 #don't change this value
-									} #dict
+##############user inputs for matching model
+minH2O = 0
+maxH2O = 8.0
+H2Ostep = 0.5
+minCO2 = 0
+maxCO2 = 1.0
+CO2step = 0.1
+minS = 0
+maxS = 1.0
+Sstep = 0.1
 
-	MeltInclusion_shallow_thermo = {	"press": 1,
-									"temp": 950,
-									"logfO2": -11.782762, #POAS is QFM
-									"XCO2": 0.016 #calculated with magmasat
+if modeltype == 2:
+	if sample == "poas":
+		MeltInclusion_deep_thermo = 	{	"press": 2000, #bars
+											"temp": 1000, #celcius
+											"logfO2": -10.804261, #absolute logfO2 value #POAS is QFM
+											"XCO2": 0.1701, #calculated with magmasat
+											"X_Sum": 0 #don't change this value
+										} #dict
+
+		MeltInclusion_shallow_thermo = {	"press": 1,
+											"temp": 950,
+											"logfO2": -11.782762, #POAS is QFM
+											"XCO2": 0.016 #calculated with magmasat
+										}
+
+		MeltComposition_deep_wt = 	{	"SiO2": 55.4, #POAS sample P80b from Cigolini et al (1991)
+									"TiO2": 0.94,
+									"Al2O3": 16.9,
+									"FeOstar": 0, #EITHER put FeOstar or separate FeO and Fe2O3, NOT BOTH! 
+									"Fe2O3": 5.26,
+									"FeO": 3.49,
+									"MnO": 0.16,
+									"MgO": 3.21,
+									"CaO": 7.17,
+									"Na2O": 3.38,
+									"K2O": 2.11,
+									"P2O5": 0.26,
+									"H2O": 5.0,
+									"CO2": 0.2,
+									"S": 0.2
 								}
 
-	MeltComposition_deep_wt = 	{	"SiO2": 55.4, #POAS sample P80b from Cigolini et al (1991)
-								"TiO2": 0.94,
-								"Al2O3": 16.9,
-								"FeOstar": 0, #EITHER put FeOstar or separate FeO and Fe2O3, NOT BOTH! 
-								"Fe2O3": 5.26,
-								"FeO": 3.49,
-								"MnO": 0.16,
-								"MgO": 3.21,
-								"CaO": 7.17,
-								"Na2O": 3.38,
-								"K2O": 2.11,
-								"P2O5": 0.26,
-								"H2O": 5.0,
-								"CO2": 0.2,
-								"S": 0.2
-							}
+		MeltComposition_shallow_wt = 	{	"SiO2": 55.4, #POAS sample P80b from Cigolini et al (1991)
+											"TiO2": 0.94,
+											"Al2O3": 16.9,
+											"FeOstar": 0,
+											"Fe2O3": 5.26,
+											"FeO": 3.49,
+											"MnO": 0.16,
+											"MgO": 3.21,
+											"CaO": 7.17,
+											"Na2O": 3.38,
+											"K2O": 2.11,
+											"P2O5": 0.26,
+											"H2O": 0.4,
+											"CO2": 0.01,
+											"S": 0.01 
+										}
 
-	MeltComposition_shallow_wt = 	{	"SiO2": 55.4, #POAS sample P80b from Cigolini et al (1991)
-										"TiO2": 0.94,
-										"Al2O3": 16.9,
-										"FeOstar": 0,
-										"Fe2O3": 5.26,
-										"FeO": 3.49,
-										"MnO": 0.16,
-										"MgO": 3.21,
-										"CaO": 7.17,
-										"Na2O": 3.38,
-										"K2O": 2.11,
-										"P2O5": 0.26,
-										"H2O": 0.4,
-										"CO2": 0.01,
-										"S": 0.01 
+	if sample == "erebus":
+		MeltInclusion_deep_thermo = 	{	"press": 4445, #bars
+											"temp": 1100, #celcius
+											"logfO2": -7.63, 
+											"XCO2": 0.93, 
+											"X_Sum": 0 #don't change this value
+										} #dict
+		
+		MeltInclusion_shallow_thermo = {	"press": 3582,
+										"temp": 1081,
+										"logfO2": -9.99
 									}
 
-if sample == "erebus":
-	MeltInclusion_deep_thermo = 	{	"press": 4445, #bars
-										"temp": 1100, #celcius
-										"logfO2": -7.63, 
-										"XCO2": 0.93, 
-										"X_Sum": 0 #don't change this value
-									} #dict
-	
-	MeltInclusion_shallow_thermo = {	"press": 3582,
-									"temp": 1081,
-									"logfO2": -9.99
+		MeltComposition_deep_wt = 	{	"SiO2": 41.70, #POAS sample P80b from Cigolini et al (1991)
+									"TiO2": 4.21,
+									"Al2O3": 14.80,
+									"FeOstar": 0, #EITHER put FeOstar or separate FeO and Fe2O3, NOT BOTH! 
+									"Fe2O3": 5.72,
+									"FeO": 8.05,
+									"MnO": 0.16,
+									"MgO": 5.95,
+									"CaO": 13.07,
+									"Na2O": 3.74,
+									"K2O": 1.65,
+									"P2O5": 0.94,
+									"H2O": 1.50,
+									"CO2": 0.5537,
+									"S": 0.2166
 								}
 
-	MeltComposition_deep_wt = 	{	"SiO2": 41.70, #POAS sample P80b from Cigolini et al (1991)
-								"TiO2": 4.21,
-								"Al2O3": 14.80,
-								"FeOstar": 0, #EITHER put FeOstar or separate FeO and Fe2O3, NOT BOTH! 
-								"Fe2O3": 5.72,
-								"FeO": 8.05,
-								"MnO": 0.16,
-								"MgO": 5.95,
-								"CaO": 13.07,
-								"Na2O": 3.74,
-								"K2O": 1.65,
-								"P2O5": 0.94,
-								"H2O": 1.50,
-								"CO2": 0.5537,
-								"S": 0.2166
-							}
-
-	MeltComposition_shallow_wt = 	{	"SiO2": 51.67, #POAS sample P80b from Cigolini et al (1991)
-										"TiO2": 1.84,
-										"Al2O3": 19.49,
-										"FeOstar": 0,
-										"Fe2O3": 1.56,
-										"FeO": 6.64,
-										"MnO": 0.21,
-										"MgO": 1.33,
-										"CaO": 4.02,
-										"Na2O": 7.73,
-										"K2O": 4.96,
-										"P2O5": 0.55,
-										"H2O": 0.28,
-										"CO2": 0.1638,
-										"S": 0.0918 
-									}
+		MeltComposition_shallow_wt = 	{	"SiO2": 51.67, #POAS sample P80b from Cigolini et al (1991)
+											"TiO2": 1.84,
+											"Al2O3": 19.49,
+											"FeOstar": 0,
+											"Fe2O3": 1.56,
+											"FeO": 6.64,
+											"MnO": 0.21,
+											"MgO": 1.33,
+											"CaO": 4.02,
+											"Na2O": 7.73,
+											"K2O": 4.96,
+											"P2O5": 0.55,
+											"H2O": 0.28,
+											"CO2": 0.1638,
+											"S": 0.0918 
+										}
 
 
 ##------------------CONSTANTS---------------##
@@ -144,15 +165,20 @@ def Convert_wt_to_molfrac(meltcomp):
 	S = MolFrac["S"]
 	sumfl = H2O + CO2 + S
 
-	H2Ofl = H2O/sumfl
-	CO2fl = CO2/sumfl
-	Sfl = S/sumfl
+	if sumfl <= 0:
+		MolFrac["end_this_loop"] = 1
 
-	MolFrac["XH2Ofl"] = H2Ofl
-	MolFrac["XCO2fl"] = CO2fl
-	MolFrac["XSfl"] = Sfl
+		return MolFrac
+	else:
+		H2Ofl = H2O/sumfl
+		CO2fl = CO2/sumfl
+		Sfl = S/sumfl
 
-	return MolFrac
+		MolFrac["XH2Ofl"] = H2Ofl
+		MolFrac["XCO2fl"] = CO2fl
+		MolFrac["XSfl"] = Sfl
+
+		return MolFrac
 
 def Difference_MI_volatiles(deep_MI, shallow_MI):
 	difference = {}
@@ -488,6 +514,17 @@ def Check_XCO2_value(thermo): #Checks that user input XCO2 value is not too larg
 		max_val = 1 - thermo["XCO"] - thermo["XH2O"] - thermo["XH2"]
 		print "Warning: User input XCO2 value is too large. Using newly calulated value of " + str(max_val)
 
+def Calc_all_Xs_from_fS(thermo):
+	thermo["XCO"] 	= Calc_XCO(thermo)
+	thermo["XCO2"] 	= Calc_XCO2(thermo)
+	thermo["XH2O"] 	= Calc_XH2O(thermo)
+	thermo["XH2"]	= Calc_XH2(thermo)
+	thermo["XH2S"]	= thermo["fH2S"] / (thermo["gammaH2S"] * thermo["press"])
+	thermo["XO2"]	= Calc_XO2(thermo)
+	thermo["XS2"]	= Calc_XS2(thermo)
+	thermo["XSO2"]	= thermo["fSO2"] / (thermo["gammaSO2"] * thermo["press"])
+
+
 
 ##-----------METHODS TO CALCULATE FLUID RATIOS-----------##
 def Calc_all_fluid_ratios(thermo, comp):
@@ -619,7 +656,139 @@ def normalize_final_Xs(thermo):
 	Normed_Xs["XS2"]	=	thermo["XS2"] / orig_X_sum
 	Normed_Xs["XSO2"]	=	thermo["XSO2"] / orig_X_sum
 
+	Normed_Xs["X_Sum"] = sum(Normed_Xs.values())
+
 	return Normed_Xs
+
+##-----------CALC FO2 FROM DELTA QFM VALUE------------##
+
+def fO2_from_dQFM(thermo):
+	fO2_at_QFM = -25096.3/thermo["tempK"] + 8.735 + 0.11*(thermo["press"] - 1)/thermo["tempK"]
+	new_log_fO2 = fO2_at_QFM + thermo["dQFMvalue"]
+	new_fO2 = 10**(new_log_fO2)
+
+	return new_fO2, new_log_fO2
+
+##------------RESPECIATE FLUIDS AT LOW P--------------##
+
+def respeciate(thermo, lowP):
+	XHtot = thermo["XH2Otot"] * 2 / 3
+	XStot = thermo["XStot"]
+	XCtot = thermo["XCO2tot"] * 1 / 3
+	XOtot = thermo["XH2Otot"] * 1 / 3 + thermo["XCO2tot"] * 2 / 3
+
+	B = thermo["gammaH2"]
+	P = lowP
+	C = thermo["KH2O"]
+	D = thermo["fO2low"]
+	sD = sqrt(D)
+	E = thermo["gammaH2O"]
+	F = thermo["KH2S"]
+	G = thermo["gammaH2S"]
+	J = thermo["gammaS2"]
+	K = thermo["KSO2"]
+	L = thermo["gammaSO2"]
+	M = thermo["KCO2"]
+	N = thermo["gammaCO2"]
+	Q = thermo["gammaCO"]
+
+	#FIRST calculate fH2 and fS2 using fsolve, two eqns; two unknowns (eqn 9 in Iacovino, 2015)
+	def equations(p):
+		fH2, fS2 = p
+		return 	(
+					( fH2/(B*P)) 	+ ((2 * C * fH2 * sD)/(3 * E * P))		+ ((2 * F * fH2 * sqrt(abs(fS2)))/(3 * G * P)) 	- XHtot, 
+					( fS2/(J * P)) 	+ ((F * fH2 * sqrt(abs(fS2)))/(3 * G * P))	+ ((K * D * sqrt(abs(fS2)))/(3 * L * P))		- XStot
+				)
+
+	fH2, fS2 = fsolve(equations, (0.00001, 0.00001))
+
+	if fS2 <= 0 or fH2 <=0:
+		thermo["solvefS2"] = 0
+		pass
+	else:
+		#SECOND calculate fCO (eqn 10 in Iacovino, 2015)
+		def fCO_func(fCO):
+			return (((M * fCO * abs(sqrt(D)))/(3 * N * lowP)) + ((fCO)/(2 * Q * lowP))	- XCtot)
+
+		[fCO] = fsolve(fCO_func, 0.001)
+
+		#THIRD calculate fCO2 using calc'd fCO and known fO2 value
+		fCO2 = M * fCO * sD
+
+		#FOURTH calcualte fSO2 using calc'd fS2 and known fO2 value
+		fSO2 = K * sqrt(fS2) * D
+
+		#FIFTH calculate fH2S using calc'd fH2 and fS2 values
+		fH2S = F * fH2 * sqrt(fS2)
+
+		#SIXTH calculate fH2O using calc'd fH2 and knwn fO2 value
+		fH2O = C * sD * fH2
+
+		thermo["fH2"] 	= fH2
+		thermo["fS2"] 	= fS2
+		thermo["fCO"] 	= fCO
+		thermo["fCO2"] 	= fCO2
+		thermo["fSO2"]	= fSO2
+		thermo["fH2S"] 	= fH2S
+		thermo["fH2O"]	= fH2O
+
+		#sync all fO2 values to only use lowP value moving forward
+		thermo["fO2"] = D
+
+		Calc_all_Xs_from_fS(thermo)
+
+##-------------TheModel----------------##
+#For differencing melt inclusions and printing normalized mole fraction values
+
+def TheModel(thermo):
+	#reset solvefS2 debugger:
+	thermo["solvefS2"] = 1
+	#Cacltulate fO2 at low P from buffer
+	#first, store deltaQFM value in thermodynamic dict
+	thermo["dQFMvalue"] = dQFMvalue
+	thermo["fO2low"], MeltInclusion_deep_thermo["logfO2"] = fO2_from_dQFM(MeltInclusion_deep_thermo)
+
+	#Calculate all fugacity coefficient, logK, and K values and put them in the thermo dict
+	CalcAllGammas(thermo)
+	Calc_all_logK(thermo)
+	logK_to_K(thermo)
+
+	respeciate(thermo, 1) #takes args thermodynamic dict, new pressure in bars. Outputs all X's via Calc_all_Xs_from_fS method
+
+	if thermo["solvefS2"] == 0:
+		pass
+	else:
+		x_values_dict = {	"XCO": thermo["XCO"],
+							"XCO2": thermo["XCO2"],
+							"XH2": thermo["XH2"],
+							"XH2O": thermo["XH2O"],
+							"XH2S": thermo["XH2S"],
+							"XO2": thermo["XO2"],
+							"XS2": thermo["XS2"],
+							"XSO2": thermo["XSO2"]}
+
+		if all(value >= 0 for value in x_values_dict.values()):
+			#Normalize X values
+			Normalized_fluid = normalize_final_Xs(thermo)
+
+			if verbose == True:
+				#Print new X values at 1 bar
+				print "\n"
+				print "Sample: " + str(sample)
+				print "\n"
+				print "Mole fractions:"
+				print("\n".join("{}: {}".format(k, v) for k, v in Normalized_fluid.items()))
+				print "\n"
+				print "Molar gas ratios:"
+				print "SO2/CO2 = " + str(Normalized_fluid["XSO2"] / Normalized_fluid["XCO2"])
+				print "H2S/SO2 = " + str(Normalized_fluid["XH2S"] / Normalized_fluid["XSO2"])
+				print "\n"
+
+				return Normalized_fluid
+			else:
+				return Normalized_fluid
+		else:
+			print "Some values less than 0"
 
 
 ##-------------DEBUGGING THE HARD WAY-------------##
@@ -643,123 +812,285 @@ def print_all_Xs(thermo):
 	thermo["X_Sum"] = X_Sum
 	print "X sum = " + str(X_Sum)
 
-##----------------THE MODEL-----------------##
-#Store temp in Kelvin
-MeltInclusion_deep_thermo["tempK"] = MeltInclusion_deep_thermo["temp"] + 273.15
-
-#CALCULATE FLUID FROM DIFFERENCED MELT INCLUSIONS#
-DegassedMI_deep_to_shallow = Difference_MI_volatiles(MeltComposition_deep_wt, MeltComposition_shallow_wt)
-
-#CONVERT WT% TO MOL FRACTION
-DegassedMI_X = Convert_wt_to_molfrac(DegassedMI_deep_to_shallow)
-MeltInclusion_deep_thermo["XCO2"] = DegassedMI_X["XCO2fl"] #volatiles must be done separately and nornmalized to volatiles-only
-MeltInclusion_deep_thermo["XH2O"] = DegassedMI_X["XH2Ofl"]
-MeltInclusion_deep_thermo["XStot"] = DegassedMI_X["XSfl"]
-
-#CALCULATE FO2 FROM LOGFO2
-MeltInclusion_deep_thermo["fO2"] = 10**(MeltInclusion_deep_thermo["logfO2"])
-
-##Speciate Degassed MI##
+##-------------Some Global Variables----------------##
 #Calculate fugacity coefficients and put them in the thermo dict
 fugacity_coefficients_list = ['gammaCO', 'gammaCO2', 'gammaH2', 'gammaH2O', 'gammaH2S', 'gammaO2', 'gammaS2', 'gammaSO2'] #List of all fugacity coefficients
 CP_list = [CPCO, CPCO2, CPH2, CPH2O, CPH2S, CPO2, CPS2, CPSO2] #List of all critical parameter dicts
 
-CalcAllGammas(MeltInclusion_deep_thermo)
+##----------------THE MODEL type1 (currently not working. These eqns necessary for EQ fluid calc)-----------------##
+if modeltype == 1:
+	#Store temp in Kelvin
+	MeltInclusion_deep_thermo["tempK"] = MeltInclusion_deep_thermo["temp"] + 273.15
 
-#Calculate all logK and K values and put them in the thermo dict
-Calc_all_logK(MeltInclusion_deep_thermo)
-logK_to_K(MeltInclusion_deep_thermo)
+	#CALCULATE FLUID FROM DIFFERENCED MELT INCLUSIONS#
+	DegassedMI_deep_to_shallow = Difference_MI_volatiles(MeltComposition_deep_wt, MeltComposition_shallow_wt)
 
-#Calculate all pure fugacities
-Calc_All_Pure_fs(MeltInclusion_deep_thermo)
+	#CONVERT WT% TO MOL FRACTION
+	DegassedMI_X = Convert_wt_to_molfrac(DegassedMI_deep_to_shallow)
+	MeltInclusion_deep_thermo["XCO2"] = DegassedMI_X["XCO2fl"] #volatiles must be done separately and nornmalized to volatiles-only
+	MeltInclusion_deep_thermo["XH2O"] = DegassedMI_X["XH2Ofl"]
+	MeltInclusion_deep_thermo["XStot"] = DegassedMI_X["XSfl"]
 
-##CO2 FIRST CALC##
-#Calculate fCO2
-MeltInclusion_deep_thermo["fCO2"] = Calc_fCO2_from_XCO2(MeltInclusion_deep_thermo)
+	#CALCULATE FO2 FROM LOGFO2
+	MeltInclusion_deep_thermo["fO2"] = 10**(MeltInclusion_deep_thermo["logfO2"])
 
+	##Speciate Degassed MI##
+	#Calculate fugacity coefficients and put them in the thermo dict
+	fugacity_coefficients_list = ['gammaCO', 'gammaCO2', 'gammaH2', 'gammaH2O', 'gammaH2S', 'gammaO2', 'gammaS2', 'gammaSO2'] #List of all fugacity coefficients
+	CP_list = [CPCO, CPCO2, CPH2, CPH2O, CPH2S, CPO2, CPS2, CPSO2] #List of all critical parameter dicts
 
-##O2##
-#Calculate XO2
-MeltInclusion_deep_thermo["XO2"] = Calc_XO2(MeltInclusion_deep_thermo)
+	CalcAllGammas(MeltInclusion_deep_thermo)
 
+	#Calculate all logK and K values and put them in the thermo dict
+	Calc_all_logK(MeltInclusion_deep_thermo)
+	logK_to_K(MeltInclusion_deep_thermo)
 
-##H2O##
-#Calculate fH2O at high P using Moore et al 1998
-#MeltInclusion_deep_thermo["fH2O"] = Calc_fH2O_Moore1998(DegassedMI_X, MeltInclusion_deep_thermo)
-#Calculate fH2O from XH2O
-MeltInclusion_deep_thermo["fH2O"] = Calc_fH2O_from_XH2O(MeltInclusion_deep_thermo)
+	#Calculate all pure fugacities
+	Calc_All_Pure_fs(MeltInclusion_deep_thermo)
 
-#Calculate XH2O
-#MeltInclusion_deep_thermo["XH2O"] = Calc_XH2O(MeltInclusion_deep_thermo)
-
-
-##H2##
-#Calculate fH2 at high P based on given fO2 and calculated fH2O
-MeltInclusion_deep_thermo["fH2"] = Calc_fH2(MeltInclusion_deep_thermo)
-
-#Calculate XH2
-MeltInclusion_deep_thermo["XH2"] = Calc_XH2(MeltInclusion_deep_thermo)
-
-#while MeltInclusion_deep_thermo["X_Sum"] < 0.999 or MeltInclusion_deep_thermo["X_Sum"] > 1.001:
-##CO##
-#Calcualte fCO
-MeltInclusion_deep_thermo["fCO"] = Calc_fCO(MeltInclusion_deep_thermo)
-
-#Calculate XCO
-MeltInclusion_deep_thermo["XCO"] = Calc_XCO(MeltInclusion_deep_thermo)
+	##CO2 FIRST CALC##
+	#Calculate fCO2
+	MeltInclusion_deep_thermo["fCO2"] = Calc_fCO2_from_XCO2(MeltInclusion_deep_thermo)
 
 
-##CO2 SECOND CALC##
-#Check XCO2 is not too large
-Check_XCO2_value(MeltInclusion_deep_thermo)
+	##O2##
+	#Calculate XO2
+	MeltInclusion_deep_thermo["XO2"] = Calc_XO2(MeltInclusion_deep_thermo)
 
 
-##SULFUR##
-#Calculate non-S Partial Pressures
-MeltInclusion_deep_thermo["PCO2"] = Calc_PCO2(MeltInclusion_deep_thermo)
-MeltInclusion_deep_thermo["PH2O"] = Calc_PH2O(MeltInclusion_deep_thermo)
-MeltInclusion_deep_thermo["PH2"] = Calc_PH2(MeltInclusion_deep_thermo)
-MeltInclusion_deep_thermo["PCO"] = Calc_PCO(MeltInclusion_deep_thermo)
-MeltInclusion_deep_thermo["PO2"] = Calc_PO2(MeltInclusion_deep_thermo)
+	##H2O##
+	#Calculate fH2O at high P using Moore et al 1998
+	#MeltInclusion_deep_thermo["fH2O"] = Calc_fH2O_Moore1998(DegassedMI_X, MeltInclusion_deep_thermo)
+	#Calculate fH2O from XH2O
+	MeltInclusion_deep_thermo["fH2O"] = Calc_fH2O_from_XH2O(MeltInclusion_deep_thermo)
 
-#Calculate PStot
-#MeltInclusion_deep_thermo["PStot"] = Calc_PStot(MeltInclusion_deep_thermo)
-MeltInclusion_deep_thermo["PStot"] = MeltInclusion_deep_thermo["press"] * MeltInclusion_deep_thermo["XStot"]
-
-#Calculate fS2 (using equation 7 from Iacovino (2015) EPSL)
-MeltInclusion_deep_thermo["fS2"] = Calc_fS2(MeltInclusion_deep_thermo)
-
-#Calculate fSO2
-MeltInclusion_deep_thermo["fSO2"] = Calc_fSO2(MeltInclusion_deep_thermo)
-
-#Calculate fH2S
-MeltInclusion_deep_thermo["fH2S"] = Calc_fH2S(MeltInclusion_deep_thermo)
-
-#Calculate XS2
-MeltInclusion_deep_thermo["XS2"] = Calc_XS2(MeltInclusion_deep_thermo)
+	#Calculate XH2O
+	#MeltInclusion_deep_thermo["XH2O"] = Calc_XH2O(MeltInclusion_deep_thermo)
 
 
-#Calculate Partial Pressures
-Calc_all_PartialPressures(MeltInclusion_deep_thermo)
+	##H2##
+	#Calculate fH2 at high P based on given fO2 and calculated fH2O
+	MeltInclusion_deep_thermo["fH2"] = Calc_fH2(MeltInclusion_deep_thermo)
 
-#Calculate fluid ratios
-Calc_all_fluid_ratios(MeltInclusion_deep_thermo, DegassedMI_X)
+	#Calculate XH2
+	MeltInclusion_deep_thermo["XH2"] = Calc_XH2(MeltInclusion_deep_thermo)
 
-#Normalize final mole fraction fluid values
-Normalized_fluid = normalize_final_Xs(MeltInclusion_deep_thermo)
+	#while MeltInclusion_deep_thermo["X_Sum"] < 0.999 or MeltInclusion_deep_thermo["X_Sum"] > 1.001:
+	##CO##
+	#Calcualte fCO
+	MeltInclusion_deep_thermo["fCO"] = Calc_fCO(MeltInclusion_deep_thermo)
 
-print_all_Xs(MeltInclusion_deep_thermo)
-print Normalized_fluid
-
-print MeltInclusion_deep_thermo["X_Sum"]
-
-
-print("{" + "\n".join("{}: {}".format(k, v) for k, v in MeltInclusion_deep_thermo.items()) + "}")
-#print("\n")
-#print("current problem: ")
+	#Calculate XCO
+	MeltInclusion_deep_thermo["XCO"] = Calc_XCO(MeltInclusion_deep_thermo)
 
 
-#dec15,2017 - maybe need totally different approach to speciate fluid, which uses XH2O, XCO2, and XStot inputs as total H, total C, total S, then speciates each of those.
+	##CO2 SECOND CALC##
+	#Check XCO2 is not too large
+	Check_XCO2_value(MeltInclusion_deep_thermo)
+
+
+	##SULFUR##
+	#Calculate non-S Partial Pressures
+	MeltInclusion_deep_thermo["PCO2"] = Calc_PCO2(MeltInclusion_deep_thermo)
+	MeltInclusion_deep_thermo["PH2O"] = Calc_PH2O(MeltInclusion_deep_thermo)
+	MeltInclusion_deep_thermo["PH2"] = Calc_PH2(MeltInclusion_deep_thermo)
+	MeltInclusion_deep_thermo["PCO"] = Calc_PCO(MeltInclusion_deep_thermo)
+	MeltInclusion_deep_thermo["PO2"] = Calc_PO2(MeltInclusion_deep_thermo)
+
+	#Calculate PStot
+	#MeltInclusion_deep_thermo["PStot"] = Calc_PStot(MeltInclusion_deep_thermo)
+	MeltInclusion_deep_thermo["PStot"] = MeltInclusion_deep_thermo["press"] * MeltInclusion_deep_thermo["XStot"]
+
+	#Calculate fS2 (using equation 7 from Iacovino (2015) EPSL)
+	MeltInclusion_deep_thermo["fS2"] = Calc_fS2(MeltInclusion_deep_thermo)
+
+	#Calculate fSO2
+	MeltInclusion_deep_thermo["fSO2"] = Calc_fSO2(MeltInclusion_deep_thermo)
+
+	#Calculate fH2S
+	MeltInclusion_deep_thermo["fH2S"] = Calc_fH2S(MeltInclusion_deep_thermo)
+
+	#Calculate XS2
+	MeltInclusion_deep_thermo["XS2"] = Calc_XS2(MeltInclusion_deep_thermo)
+
+
+	#Calculate Partial Pressures
+	Calc_all_PartialPressures(MeltInclusion_deep_thermo)
+
+	#Calculate fluid ratios
+	Calc_all_fluid_ratios(MeltInclusion_deep_thermo, DegassedMI_X)
+
+	#Normalize final mole fraction fluid values
+	Normalized_fluid = normalize_final_Xs(MeltInclusion_deep_thermo)
+
+	print_all_Xs(MeltInclusion_deep_thermo)
+	print Normalized_fluid
+
+	print MeltInclusion_deep_thermo["X_Sum"]
+
+
+	print("{" + "\n".join("{}: {}".format(k, v) for k, v in MeltInclusion_deep_thermo.items()) + "}")
+	#print("\n")
+	#print("current problem: ")
+
+##-----------------NEW MODEL type2 (use this for MI differencing)----------------##
+if modeltype == 2:
+	#respeciate fluids
+
+	#Store temp in Kelvin
+	MeltInclusion_deep_thermo["tempK"] = MeltInclusion_deep_thermo["temp"] + 273.15
+
+	#CALCULATE FLUID FROM DIFFERENCED MELT INCLUSIONS#
+	DegassedMI_deep_to_shallow = Difference_MI_volatiles(MeltComposition_deep_wt, MeltComposition_shallow_wt)
+
+	#SET LOW PRESSURE
+	MeltInclusion_deep_thermo["press"] = lowP
+
+	#CONVERT WT% TO MOL FRACTION
+	DegassedMI_X = Convert_wt_to_molfrac(DegassedMI_deep_to_shallow)
+	MeltInclusion_deep_thermo["XCO2tot"] = DegassedMI_X["XCO2fl"] #volatiles must be done separately and nornmalized to volatiles-only
+	MeltInclusion_deep_thermo["XH2Otot"] = DegassedMI_X["XH2Ofl"]
+	MeltInclusion_deep_thermo["XStot"] = DegassedMI_X["XSfl"]
+
+	TheModel(MeltInclusion_deep_thermo)
 
 
 
+
+###-------------MATCHING MODEL (type3)----------------###
+if modeltype == 3:
+	H2Orange = np.arange(minH2O, maxH2O, H2Ostep)
+	CO2range = np.arange(minCO2, maxCO2, CO2step)
+	Srange = np.arange(minS, maxS, Sstep)
+
+	iternumber = 0
+	list_of_fluid_dicts = [] #create an empty list which we will append each calculated dict (containing normalized calc'd fluid comps) to
+	for i in H2Orange:
+		for j in CO2range:
+			for k in Srange:
+				#Make your thermo dict with the values in this iteration.....
+				if sample == "poas":
+					MeltInclusion_deep_thermo = 	{	"press": 2000, #bars
+														"temp": 1000, #celcius
+														"logfO2": -10.804261, #absolute logfO2 value #POAS is QFM
+														"X_Sum": 0 #don't change this value
+													} #dict
+
+					MeltInclusion_shallow_thermo = {	"press": 1,
+														"temp": 950,
+														"logfO2": -11.782762, #POAS is QFM
+													}
+
+					MeltComposition_deep_wt = 	{	"SiO2": 55.4, #POAS sample P80b from Cigolini et al (1991)
+													"TiO2": 0.94,
+													"Al2O3": 16.9,
+													"FeOstar": 0, #EITHER put FeOstar or separate FeO and Fe2O3, NOT BOTH! 
+													"Fe2O3": 5.26,
+													"FeO": 3.49,
+													"MnO": 0.16,
+													"MgO": 3.21,
+													"CaO": 7.17,
+													"Na2O": 3.38,
+													"K2O": 2.11,
+													"P2O5": 0.26,
+													"H2O": i,
+													"CO2": j,
+													"S": k
+												}
+
+					MeltComposition_shallow_wt = 	{	"SiO2": 55.4, #POAS sample P80b from Cigolini et al (1991)
+														"TiO2": 0.94,
+														"Al2O3": 16.9,
+														"FeOstar": 0,
+														"Fe2O3": 5.26,
+														"FeO": 3.49,
+														"MnO": 0.16,
+														"MgO": 3.21,
+														"CaO": 7.17,
+														"Na2O": 3.38,
+														"K2O": 2.11,
+														"P2O5": 0.26,
+														"H2O": 0,
+														"CO2": 0,
+														"S": 0
+													}
+
+				if sample == "erebus":
+					MeltInclusion_deep_thermo = 	{	"press": 4445, #bars
+														"temp": 1100, #celcius
+														"logfO2": -7.63, 
+														"X_Sum": 0 #don't change this value
+													} #dict
+					
+					MeltInclusion_shallow_thermo = {	"press": 3582,
+													"temp": 1081,
+													"logfO2": -9.99
+												}
+
+					MeltComposition_deep_wt = 	{	"SiO2": 41.70, #POAS sample P80b from Cigolini et al (1991)
+													"TiO2": 4.21,
+													"Al2O3": 14.80,
+													"FeOstar": 0, #EITHER put FeOstar or separate FeO and Fe2O3, NOT BOTH! 
+													"Fe2O3": 5.72,
+													"FeO": 8.05,
+													"MnO": 0.16,
+													"MgO": 5.95,
+													"CaO": 13.07,
+													"Na2O": 3.74,
+													"K2O": 1.65,
+													"P2O5": 0.94,
+													"H2O": i,
+													"CO2": j,
+													"S": k
+												}
+
+					MeltComposition_shallow_wt = 	{	"SiO2": 51.67, #POAS sample P80b from Cigolini et al (1991)
+														"TiO2": 1.84,
+														"Al2O3": 19.49,
+														"FeOstar": 0,
+														"Fe2O3": 1.56,
+														"FeO": 6.64,
+														"MnO": 0.21,
+														"MgO": 1.33,
+														"CaO": 4.02,
+														"Na2O": 7.73,
+														"K2O": 4.96,
+														"P2O5": 0.55,
+														"H2O": 0,
+														"CO2": 0,
+														"S": 0
+													}
+
+				#Some precursors.....
+				#Store temp in Kelvin
+				MeltInclusion_deep_thermo["tempK"] = MeltInclusion_deep_thermo["temp"] + 273.15
+
+				#CALCULATE FLUID FROM DIFFERENCED MELT INCLUSIONS#
+				DegassedMI_deep_to_shallow = Difference_MI_volatiles(MeltComposition_deep_wt, MeltComposition_shallow_wt)
+
+				#SET LOW PRESSURE
+				MeltInclusion_deep_thermo["press"] = lowP
+
+				#CONVERT WT% TO MOL FRACTION
+				DegassedMI_X = Convert_wt_to_molfrac(DegassedMI_deep_to_shallow)
+
+				iternumber += 1
+				print iternumber
+
+				if "end_this_loop" in DegassedMI_X:
+					break #TODO
+				else:
+					MeltInclusion_deep_thermo["XCO2tot"] = DegassedMI_X["XCO2fl"] #volatiles must be done separately and nornmalized to volatiles-only
+					MeltInclusion_deep_thermo["XH2Otot"] = DegassedMI_X["XH2Ofl"]
+					MeltInclusion_deep_thermo["XStot"] = DegassedMI_X["XSfl"]
+
+					#run the model.....
+					Normd_fluid = TheModel(MeltInclusion_deep_thermo)
+					if Normd_fluid is None:
+						pass
+					else:
+						Normd_fluid["iternumber"] = iternumber
+						list_of_fluid_dicts.append(Normd_fluid)
+
+	data = pandas.DataFrame(list_of_fluid_dicts)
+	print data
