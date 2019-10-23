@@ -1,0 +1,63 @@
+Model type 3
+
+Set H2O, CO2, S ranges (for MI)
+
+1. Generate dictionaries with every combo of MI volatile values possible
+
+2. Calculate fluid from differenced MI
+	Using Difference_MI_volailtes method
+		Store in Degassed_MI_deep_to_shallow dict
+			Deep wt% majors
+			Differenced wt% volatiles
+
+3. Convert wt% to mole fraction
+	Using Convert_wt_to_molfrac
+		Store in DegassedMI_X
+			Deep majors in X
+			Deep dissolved volatiles in X
+			Fluid comp volatiles in X
+
+4. Store fluid comp volatiles in X in MeltInclusion_deep_thermo
+	MeltInclusion_deep_thermo now contains:
+		press (highP)
+		temp in C
+		logfO2
+		temp in K
+		press (low P)
+		XH2Ofl
+		XCO2fl
+		XSfl
+
+5. Run the model on MeltInclusion_deep_thermo
+	Store to Normd_fluid
+		Here is what the model does....
+			1. Calculate fO2 using fO2_from_dQFM
+			2. Calculate all gammas
+			3. Calculate all log Ks
+			4. Calculate K from log K
+			5. Respeciate the fluid comp using respeciate(thermo, 1)
+				Here is what respeciate does...
+					1. Calculates XHtot, XStot, XCtot, XOtot
+					2. Calculates fH2 and fS2 using fsolve, two eqns, two unknowls (eqn 9 in Iacovino, 2015)
+					3. Calculate fCO (eqn 10 in Iacovino, 2015)
+					4. Calculate fCO2 using calc'd fCO and known fO2
+					5. calculate fSO2 using calc'd fS2 and known fO2
+					6. Calculate fH2S using calc'd fH2 and fS2 values
+					7. Calculate fH2O using calc'd fH2 and known fO2
+					9. Calculate all X's from f's
+					8. Store these in MeltInclusion_deep_thermo
+						MeltInclusion_deep_thermo now contains:
+							press (highP)
+							temp in C
+							logfO2
+							temp in K
+							press (low P)
+							XH2Ofl
+							XCO2fl
+							XSfl
+							fO2 low
+							all gammas
+							all log K's
+							all K's
+							all f's (from respeciate)
+							all X's (called form within respeciate, which is dumb. Change this.)
