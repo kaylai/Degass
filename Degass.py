@@ -1,6 +1,6 @@
 from math import *
 import math
-from scipy.optimize import fsolve, minimize
+from scipy.optimize import fsolve, minimize, broyden1
 import numpy as np
 import pandas
 import os
@@ -19,11 +19,18 @@ verbose = False #set to true to print out debugging statements in terminal
 verbose_errors = True #set to true to print all calculated values thus far when an exception is raised
 MatchBoth = True #set to true to only find matches that satisfy BOTH SO2/CO2 and H2S/SO2 ratios. False results in matches calculated for each ratio separately.
 
-###############user settings
-sample = "poas"
-modeltype = 3
-lowP = 1 #for model types 2 and 3, in bars
-dQFMvalue = 0 #for model types 2 and 3, need to know fO2 relative to QFM buffer
+###For algorithm to match with surface gas data
+gasdatafilename = "PreppedPoasData.xlsx" #filename of excel file with surface gas data
+tolerance = 0.20 #percent allowable tolerance around calcaulted values to find a match with observed data. 0.05 = 5%
+
+dQFMvalue = 0 #for model types 2 and 3, need to know fO2 relative to QFM buffer (set as constant)
+
+vary_fO2_value = True #if want to test a range of fO2 values
+if vary_fO2_value == True:
+	min_dQFM = -1.0
+	max_dQFM = 1.0
+	dQFMstep = 0.1
+
 
 ##############user inputs for matching model
 #####values as dissolved wt% concentrations in deep melt inclusions
@@ -36,139 +43,25 @@ CO2step = 0.01
 minS = 0.03
 maxS = 0.5
 Sstep = 0.05
+minP = 1.0
+maxP = 2000.0
+Pstep = 1.0
 
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+
+##-------------------SOME BOOK KEEPING---------------##
+
+###Some common assertions
 assert minH2O > 0, "Minimum dissolved H2O in deep melt inclusion cannot be zero. Try 0.0001 if you want a very low value."
 assert minCO2 > 0, "Minimum dissolved CO2 in deep melt inclusion cannot be zero. Try 0.0001 if you want a very low value."
 assert minS > 0, "Minimum dissolved S in deep melt inclusion cannot be zero. Try 0.0001 if you want a very low value."
 
-##############user inputs - surface gas compositions at Poas- for matching model
-surfaceSO2_CO2_min = 25
-surfaceSO2_CO2_max = 32
-surfaceSO2_CO2_step = 1 #maybe not needed, can just use range
-
-surfaceH2S_SO2_min = 0
-surfaceH2S_SO2_max = 12
-surfaceH2S_SO2_step = 1 #maybe not needed, can just use range
-
-###surface gas comps for plotting:
-eruption_SO2_CO2 = 30
-eruption_SO2_CO2_range = 0
-eruption_H2S_SO2 = 0
-eruption_H2S_SO2_range = 0
-#not currently used:
-# quiescent_SO2_CO2 = 2.5
-# quiescent_SO2_CO2_range = 0.5
-# quiescent_H2S_SO2 = 5.5
-# quiescent_H2S_SO2_range = 4.5
-
 ###For algorithm to match with surface gas data
-gasdatafilename = "PreppedPoasData.xlsx" #filename of excel file with surface gas data
-tolerance = 0.20 #percent allowable tolerance around calcaulted values to find a match with observed data. 0.05 = 5%
-
 GasData = pandas.read_excel(gasdatafilename) #Read in gas data
 minvalgasdata1 = GasData["SO2/CO2"].min()
 maxvalgasdata1 = GasData["SO2/CO2"].max()
 minvalgasdata2 = GasData["H2S/SO2"].min()
 maxvalgasdata2 = GasData["H2S/SO2"].max()
-
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-
-if modeltype == 2:
-	if sample == "poas":
-		MeltInclusion_deep_thermo = 	{	"press": 2000, #bars
-											"temp": 1000, #celcius
-											"logfO2": -10.804261, #absolute logfO2 value #POAS is QFM
-											"XCO2": 0.1701, #calculated with magmasat
-											"X_Sum": 0 #don't change this value
-										} #dict
-
-		MeltInclusion_shallow_thermo = {	"press": 1,
-											"temp": 950,
-											"logfO2": -11.782762, #POAS is QFM
-											"XCO2": 0.016 #calculated with magmasat
-										}
-
-		MeltComposition_deep_wt = 	{	"SiO2": 55.4, #POAS sample P80b from Cigolini et al (1991)
-									"TiO2": 0.94,
-									"Al2O3": 16.9,
-									"FeOstar": 0, #EITHER put FeOstar or separate FeO and Fe2O3, NOT BOTH! 
-									"Fe2O3": 5.26,
-									"FeO": 3.49,
-									"MnO": 0.16,
-									"MgO": 3.21,
-									"CaO": 7.17,
-									"Na2O": 3.38,
-									"K2O": 2.11,
-									"P2O5": 0.26,
-									"H2O": 5.0,
-									"CO2": 0.2,
-									"S": 0.2
-								}
-
-		MeltComposition_shallow_wt = 	{	"SiO2": 55.4, #POAS sample P80b from Cigolini et al (1991)
-											"TiO2": 0.94,
-											"Al2O3": 16.9,
-											"FeOstar": 0,
-											"Fe2O3": 5.26,
-											"FeO": 3.49,
-											"MnO": 0.16,
-											"MgO": 3.21,
-											"CaO": 7.17,
-											"Na2O": 3.38,
-											"K2O": 2.11,
-											"P2O5": 0.26,
-											"H2O": 0.4,
-											"CO2": 0.01,
-											"S": 0.01 
-										}
-
-	if sample == "erebus":
-		MeltInclusion_deep_thermo = 	{	"press": 4445, #bars
-											"temp": 1100, #celcius
-											"logfO2": -7.63, 
-											"XCO2": 0.93, 
-											"X_Sum": 0 #don't change this value
-										} #dict
-		
-		MeltInclusion_shallow_thermo = {	"press": 3582,
-										"temp": 1081,
-										"logfO2": -9.99
-									}
-
-		MeltComposition_deep_wt = 	{	"SiO2": 41.70, #POAS sample P80b from Cigolini et al (1991)
-									"TiO2": 4.21,
-									"Al2O3": 14.80,
-									"FeOstar": 0, #EITHER put FeOstar or separate FeO and Fe2O3, NOT BOTH! 
-									"Fe2O3": 5.72,
-									"FeO": 8.05,
-									"MnO": 0.16,
-									"MgO": 5.95,
-									"CaO": 13.07,
-									"Na2O": 3.74,
-									"K2O": 1.65,
-									"P2O5": 0.94,
-									"H2O": 1.50,
-									"CO2": 0.5537,
-									"S": 0.2166
-								}
-
-		MeltComposition_shallow_wt = 	{	"SiO2": 51.67, #POAS sample P80b from Cigolini et al (1991)
-											"TiO2": 1.84,
-											"Al2O3": 19.49,
-											"FeOstar": 0,
-											"Fe2O3": 1.56,
-											"FeO": 6.64,
-											"MnO": 0.21,
-											"MgO": 1.33,
-											"CaO": 4.02,
-											"Na2O": 7.73,
-											"K2O": 4.96,
-											"P2O5": 0.55,
-											"H2O": 0.28,
-											"CO2": 0.1638,
-											"S": 0.0918 
-										}
-
 
 ##------------------CONSTANTS---------------##
 
@@ -814,10 +707,27 @@ def respeciate(thermo, lowP):
 		fH2, fS2 = p
 		return 	(
 					( (fH2/(B*P)) 	+ ((2 * C * fH2 * sD)/(3 * E * P))		+ ((2 * F * fH2 * sqrt(abs(fS2)))/(3 * G * P)) 	- XHtot), 
-					( (fS2/(J * P)) 	+ ((F * fH2 * sqrt(abs(fS2)))/(3 * G * P))	+ ((K * D * sqrt(abs(fS2)))/(3 * L * P))		- XStot)
+					( (abs(fS2)/(J * P)) 	+ ((F * fH2 * sqrt(abs(fS2)))/(3 * G * P))	+ ((K * D * sqrt(abs(fS2)))/(3 * L * P))		- XStot)
 				)
 
-	fH2, fS2 = fsolve(equations, (0.00001, 0.00001))
+	fH2, fS2 = fsolve(equations, (0.0001, 0.0000001))
+
+	print str(fH2)
+	print str(fS2)
+	print "B = " + str(B)
+	print "P = " + str(P)
+	print "C = " + str(C)
+	print "D = " + str(D)
+	print "sD = " + str(sD)
+	print "E = " + str(E)
+	print "F = " + str(F)
+	print "G = " + str(G)
+	print "J = " + str(J)
+	print "K = " + str(K)
+	print "L = " + str(L)
+	print "M = " + str(M)
+	print "N = " + str(N)
+	print "Q = " + str(Q)
 
 	if fS2 <= 0 or fH2 <=0:
 		fS2 = 0.001
@@ -964,541 +874,408 @@ def print_all_Xs(thermo):
 fugacity_coefficients_list = ['gammaCO', 'gammaCO2', 'gammaH2', 'gammaH2O', 'gammaH2S', 'gammaO2', 'gammaS2', 'gammaSO2'] #List of all fugacity coefficients
 CP_list = [CPCO, CPCO2, CPH2, CPH2O, CPH2S, CPO2, CPS2, CPSO2] #List of all critical parameter dicts
 
-##----------------THE MODEL type1 (currently not working. These eqns necessary for EQ fluid calc)-----------------##
-if modeltype == 1:
-	#Store temp in Kelvin
-	MeltInclusion_deep_thermo["tempK"] = MeltInclusion_deep_thermo["temp"] + 273.15
 
-	#CALCULATE FLUID FROM DIFFERENCED MELT INCLUSIONS#
-	DegassedMI_deep_to_shallow = Difference_MI_volatiles(MeltComposition_deep_wt, MeltComposition_shallow_wt)
+###-------------THERMO MODEL----------------###
+H2Orange = np.arange(minH2O, maxH2O, H2Ostep)
+CO2range = np.arange(minCO2, maxCO2, CO2step)
+Srange = np.arange(minS, maxS, Sstep)
+Prange = np.arange(minP, maxP, Pstep)
+
+iternumber = 0
+list_of_fluid_dicts = [] #create an empty list which we will append each calculated dict (containing normalized calc'd fluid comps) to
+thermolist = [] #create an empty list which we will append each thermo dict to
+wtlist = [] #create an empty list which we will append petrology data to for each run
+for i in H2Orange:
+	for j in CO2range:
+		for k in Srange:
+			#Make your thermo dict with the values in this iteration.....
+			MeltInclusion_deep_thermo = 	{	"highPressure": 2000, #bars
+												"temp": 1000, #celcius
+												"X_Sum": 0 #don't change this value
+											} #dict
+
+			MeltInclusion_shallow_thermo = {	"press": 1,
+												"temp": 950,
+											}
+
+			MeltComposition_deep_wt = 	{	"SiO2": 55.4, #POAS sample P80b from Cigolini et al (1991)
+											"TiO2": 0.94,
+											"Al2O3": 16.9,
+											"FeOstar": 0, #EITHER put FeOstar or separate FeO and Fe2O3, NOT BOTH! 
+											"Fe2O3": 5.26,
+											"FeO": 3.49,
+											"MnO": 0.16,
+											"MgO": 3.21,
+											"CaO": 7.17,
+											"Na2O": 3.38,
+											"K2O": 2.11,
+											"P2O5": 0.26,
+											"H2O": i,
+											"CO2": j,
+											"S": k
+										}
+
+			MeltComposition_shallow_wt = 	{	"SiO2": 55.4, #POAS sample P80b from Cigolini et al (1991)
+												"TiO2": 0.94,
+												"Al2O3": 16.9,
+												"FeOstar": 0,
+												"Fe2O3": 5.26,
+												"FeO": 3.49,
+												"MnO": 0.16,
+												"MgO": 3.21,
+												"CaO": 7.17,
+												"Na2O": 3.38,
+												"K2O": 2.11,
+												"P2O5": 0.26,
+												"H2O": 0,
+												"CO2": 0,
+												"S": 0
+											}
+
+			#Some precursors.....
+			#Store temp in Kelvin
+			MeltInclusion_deep_thermo["tempK"] = MeltInclusion_deep_thermo["temp"] + 273.15
+
+			#CALCULATE FLUID FROM DIFFERENCED MELT INCLUSIONS#
+			DegassedMI_deep_to_shallow = Difference_MI_volatiles(MeltComposition_deep_wt, MeltComposition_shallow_wt)
+
+			#SET LOW PRESSURE
+			MeltInclusion_deep_thermo["press"] = 1.0
+
+			#CONVERT WT% TO MOL FRACTION
+			DegassedMI_X = Convert_wt_to_molfrac(DegassedMI_deep_to_shallow)
 
-	#CONVERT WT% TO MOL FRACTION
-	DegassedMI_X = Convert_wt_to_molfrac(DegassedMI_deep_to_shallow)
-	MeltInclusion_deep_thermo["XCO2"] = DegassedMI_X["XCO2fl"] #volatiles must be done separately and nornmalized to volatiles-only
-	MeltInclusion_deep_thermo["XH2O"] = DegassedMI_X["XH2Ofl"]
-	MeltInclusion_deep_thermo["XStot"] = DegassedMI_X["XSfl"]
-
-	#CALCULATE FO2 FROM LOGFO2
-	MeltInclusion_deep_thermo["fO2"] = 10**(MeltInclusion_deep_thermo["logfO2"])
-
-	##Speciate Degassed MI##
-	#Calculate fugacity coefficients and put them in the thermo dict
-	fugacity_coefficients_list = ['gammaCO', 'gammaCO2', 'gammaH2', 'gammaH2O', 'gammaH2S', 'gammaO2', 'gammaS2', 'gammaSO2'] #List of all fugacity coefficients
-	CP_list = [CPCO, CPCO2, CPH2, CPH2O, CPH2S, CPO2, CPS2, CPSO2] #List of all critical parameter dicts
-
-	CalcAllGammas(MeltInclusion_deep_thermo)
-
-	#Calculate all logK and K values and put them in the thermo dict
-	Calc_all_logK(MeltInclusion_deep_thermo)
-	logK_to_K(MeltInclusion_deep_thermo)
-
-	#Calculate all pure fugacities
-	Calc_All_Pure_fs(MeltInclusion_deep_thermo)
-
-	##CO2 FIRST CALC##
-	#Calculate fCO2
-	MeltInclusion_deep_thermo["fCO2"] = Calc_fCO2_from_XCO2(MeltInclusion_deep_thermo)
-
-
-	##O2##
-	#Calculate XO2
-	MeltInclusion_deep_thermo["XO2"] = Calc_XO2(MeltInclusion_deep_thermo)
-
-
-	##H2O##
-	#Calculate fH2O at high P using Moore et al 1998
-	#MeltInclusion_deep_thermo["fH2O"] = Calc_fH2O_Moore1998(DegassedMI_X, MeltInclusion_deep_thermo)
-	#Calculate fH2O from XH2O
-	MeltInclusion_deep_thermo["fH2O"] = Calc_fH2O_from_XH2O(MeltInclusion_deep_thermo)
-
-	#Calculate XH2O
-	#MeltInclusion_deep_thermo["XH2O"] = Calc_XH2O(MeltInclusion_deep_thermo)
-
-
-	##H2##
-	#Calculate fH2 at high P based on given fO2 and calculated fH2O
-	MeltInclusion_deep_thermo["fH2"] = Calc_fH2(MeltInclusion_deep_thermo)
-
-	#Calculate XH2
-	MeltInclusion_deep_thermo["XH2"] = Calc_XH2(MeltInclusion_deep_thermo)
-
-	#while MeltInclusion_deep_thermo["X_Sum"] < 0.999 or MeltInclusion_deep_thermo["X_Sum"] > 1.001:
-	##CO##
-	#Calcualte fCO
-	MeltInclusion_deep_thermo["fCO"] = Calc_fCO(MeltInclusion_deep_thermo)
-
-	#Calculate XCO
-	MeltInclusion_deep_thermo["XCO"] = Calc_XCO(MeltInclusion_deep_thermo)
-
-
-	##CO2 SECOND CALC##
-	#Check XCO2 is not too large
-	Check_XCO2_value(MeltInclusion_deep_thermo)
-
-
-	##SULFUR##
-	#Calculate non-S Partial Pressures
-	MeltInclusion_deep_thermo["PCO2"] = Calc_PCO2(MeltInclusion_deep_thermo)
-	MeltInclusion_deep_thermo["PH2O"] = Calc_PH2O(MeltInclusion_deep_thermo)
-	MeltInclusion_deep_thermo["PH2"] = Calc_PH2(MeltInclusion_deep_thermo)
-	MeltInclusion_deep_thermo["PCO"] = Calc_PCO(MeltInclusion_deep_thermo)
-	MeltInclusion_deep_thermo["PO2"] = Calc_PO2(MeltInclusion_deep_thermo)
-
-	#Calculate PStot
-	#MeltInclusion_deep_thermo["PStot"] = Calc_PStot(MeltInclusion_deep_thermo)
-	MeltInclusion_deep_thermo["PStot"] = MeltInclusion_deep_thermo["press"] * MeltInclusion_deep_thermo["XStot"]
-
-	#Calculate fS2 (using equation 7 from Iacovino (2015) EPSL)
-	MeltInclusion_deep_thermo["fS2"] = Calc_fS2(MeltInclusion_deep_thermo)
-
-	#Calculate fSO2
-	MeltInclusion_deep_thermo["fSO2"] = Calc_fSO2(MeltInclusion_deep_thermo)
-
-	#Calculate fH2S
-	MeltInclusion_deep_thermo["fH2S"] = Calc_fH2S(MeltInclusion_deep_thermo)
-
-	#Calculate XS2
-	MeltInclusion_deep_thermo["XS2"] = Calc_XS2(MeltInclusion_deep_thermo)
-
-
-	#Calculate Partial Pressures
-	Calc_all_PartialPressures(MeltInclusion_deep_thermo)
-
-	#Calculate fluid ratios
-	Calc_all_fluid_ratios(MeltInclusion_deep_thermo, DegassedMI_X)
-
-	#Normalize final mole fraction fluid values
-	Normalized_fluid = normalize_final_Xs(MeltInclusion_deep_thermo)
-
-	print_all_Xs(MeltInclusion_deep_thermo)
-	print Normalized_fluid
-
-	print MeltInclusion_deep_thermo["X_Sum"]
-
-
-	print("{" + "\n".join("{}: {}".format(k, v) for k, v in MeltInclusion_deep_thermo.items()) + "}")
-	#print("\n")
-	#print("current problem: ")
-
-##-----------------NEW MODEL type2 (use this for MI differencing)----------------##
-if modeltype == 2:
-	#respeciate fluids
-
-	#Store temp in Kelvin
-	MeltInclusion_deep_thermo["tempK"] = MeltInclusion_deep_thermo["temp"] + 273.15
-
-	#CALCULATE FLUID FROM DIFFERENCED MELT INCLUSIONS#
-	DegassedMI_deep_to_shallow = Difference_MI_volatiles(MeltComposition_deep_wt, MeltComposition_shallow_wt)
-
-	#SET LOW PRESSURE
-	MeltInclusion_deep_thermo["press"] = lowP
-
-	#CONVERT WT% TO MOL FRACTION
-	DegassedMI_X = Convert_wt_to_molfrac(DegassedMI_deep_to_shallow)
-	MeltInclusion_deep_thermo["XCO2tot"] = DegassedMI_X["XCO2fl"] #volatiles must be done separately and nornmalized to volatiles-only
-	MeltInclusion_deep_thermo["XH2Otot"] = DegassedMI_X["XH2Ofl"]
-	MeltInclusion_deep_thermo["XStot"] = DegassedMI_X["XSfl"]
-
-	TheModel(MeltInclusion_deep_thermo)
-
-
-
-
-###-------------MATCHING MODEL (type3)----------------###
-if modeltype == 3:
-	H2Orange = np.arange(minH2O, maxH2O, H2Ostep)
-	CO2range = np.arange(minCO2, maxCO2, CO2step)
-	Srange = np.arange(minS, maxS, Sstep)
-
-	iternumber = 0
-	list_of_fluid_dicts = [] #create an empty list which we will append each calculated dict (containing normalized calc'd fluid comps) to
-	thermolist = [] #create an empty list which we will append each thermo dict to
-	wtlist = [] #create an empty list which we will append petrology data to for each run
-	for i in H2Orange:
-		for j in CO2range:
-			for k in Srange:
-				#Make your thermo dict with the values in this iteration.....
-				if sample == "poas":
-					MeltInclusion_deep_thermo = 	{	"highPressure": 2000, #bars
-														"temp": 1000, #celcius
-														"logfO2": -10.804261, #absolute logfO2 value #POAS is QFM
-														"X_Sum": 0 #don't change this value
-													} #dict
-
-					MeltInclusion_shallow_thermo = {	"press": 1,
-														"temp": 950,
-														"logfO2": -11.782762, #POAS is QFM
-													}
-
-					MeltComposition_deep_wt = 	{	"SiO2": 55.4, #POAS sample P80b from Cigolini et al (1991)
-													"TiO2": 0.94,
-													"Al2O3": 16.9,
-													"FeOstar": 0, #EITHER put FeOstar or separate FeO and Fe2O3, NOT BOTH! 
-													"Fe2O3": 5.26,
-													"FeO": 3.49,
-													"MnO": 0.16,
-													"MgO": 3.21,
-													"CaO": 7.17,
-													"Na2O": 3.38,
-													"K2O": 2.11,
-													"P2O5": 0.26,
-													"H2O": i,
-													"CO2": j,
-													"S": k
-												}
-
-					MeltComposition_shallow_wt = 	{	"SiO2": 55.4, #POAS sample P80b from Cigolini et al (1991)
-														"TiO2": 0.94,
-														"Al2O3": 16.9,
-														"FeOstar": 0,
-														"Fe2O3": 5.26,
-														"FeO": 3.49,
-														"MnO": 0.16,
-														"MgO": 3.21,
-														"CaO": 7.17,
-														"Na2O": 3.38,
-														"K2O": 2.11,
-														"P2O5": 0.26,
-														"H2O": 0,
-														"CO2": 0,
-														"S": 0
-													}
-
-				if sample == "erebus":
-					MeltInclusion_deep_thermo = 	{	"highPressure": 4445, #bars
-														"temp": 1100, #celcius
-														"logfO2": -7.63, 
-														"X_Sum": 0 #don't change this value
-													} #dict
-					
-					MeltInclusion_shallow_thermo = {	"press": 3582,
-													"temp": 1081,
-													"logfO2": -9.99
-												}
-					#TODO do I need to renormalize the wt data each loop???
-					MeltComposition_deep_wt = 	{	"SiO2": 41.70, #POAS sample P80b from Cigolini et al (1991) 
-													"TiO2": 4.21,
-													"Al2O3": 14.80,
-													"FeOstar": 0, #EITHER put FeOstar or separate FeO and Fe2O3, NOT BOTH! 
-													"Fe2O3": 5.72,
-													"FeO": 8.05,
-													"MnO": 0.16,
-													"MgO": 5.95,
-													"CaO": 13.07,
-													"Na2O": 3.74,
-													"K2O": 1.65,
-													"P2O5": 0.94,
-													"H2O": i,
-													"CO2": j,
-													"S": k
-												}
-
-					MeltComposition_shallow_wt = 	{	"SiO2": 51.67, #POAS sample P80b from Cigolini et al (1991)
-														"TiO2": 1.84,
-														"Al2O3": 19.49,
-														"FeOstar": 0,
-														"Fe2O3": 1.56,
-														"FeO": 6.64,
-														"MnO": 0.21,
-														"MgO": 1.33,
-														"CaO": 4.02,
-														"Na2O": 7.73,
-														"K2O": 4.96,
-														"P2O5": 0.55,
-														"H2O": 0,
-														"CO2": 0,
-														"S": 0
-													}
-
-				#Some precursors.....
-				#Store temp in Kelvin
-				MeltInclusion_deep_thermo["tempK"] = MeltInclusion_deep_thermo["temp"] + 273.15
-
-				#CALCULATE FLUID FROM DIFFERENCED MELT INCLUSIONS#
-				DegassedMI_deep_to_shallow = Difference_MI_volatiles(MeltComposition_deep_wt, MeltComposition_shallow_wt)
-
-				#SET LOW PRESSURE
-				MeltInclusion_deep_thermo["press"] = lowP
-
-				#CONVERT WT% TO MOL FRACTION
-				DegassedMI_X = Convert_wt_to_molfrac(DegassedMI_deep_to_shallow)
-
-				iternumber += 1
-				print iternumber
-
-				MeltInclusion_deep_thermo["XCO2tot"] = DegassedMI_X["XCO2fl"] #volatiles must be done separately and nornmalized to volatiles-only
-				MeltInclusion_deep_thermo["XH2Otot"] = DegassedMI_X["XH2Ofl"]
-				MeltInclusion_deep_thermo["XStot"] = DegassedMI_X["XSfl"]
-
-				#run the model.....
-				MeltInclusion_deep_thermo["dont_save_this_iteration"] = False
-				Normd_fluid = TheModel(MeltInclusion_deep_thermo)
-				if Normd_fluid is None:
-					if verbose_errors == True:
-						print "\n"
-						print "Verbose errors:"
-						print "Normd_fluid:"
-						print Normd_fluid
-						print "Thermo dict:"
-						print MeltInclusion_deep_thermo
-					else:
-						pass
-					raise ValueError, "Normd_fluid is None"
-				else:
-					pass
-				if MeltInclusion_deep_thermo["dont_save_this_iteration"] == False:
-					Normd_fluid["ratio_SO2_CO2"] = Normd_fluid["XSO2"] / Normd_fluid["XCO2"]
-					Normd_fluid["ratio_H2S_SO2"] = Normd_fluid["XH2S"] / Normd_fluid["XSO2"]
-
-					#save data externally to this loop
-					list_of_fluid_dicts.append(Normd_fluid)
-					MeltInclusion_deep_thermo["iternumber"] = iternumber
-					thermolist.append(MeltInclusion_deep_thermo)
-					wtlist.append(MeltComposition_deep_wt)
-
-				else:
-					pass
-
-	thermoFrame = pandas.DataFrame(thermolist) 
-	wtFrame = pandas.DataFrame(wtlist)
-	data = pandas.DataFrame(list_of_fluid_dicts)
-
-	#calculate all S as SO2 and all C as CO2
-	data["XSO2_star"] = data["XSO2"] + data["XH2S"]
-	data["XCO2_star"] = data["XCO2"] + data["XCO"] * (0.5) * 3
-	data["ratio_SO2star_CO2star"] = data["XSO2_star"] / data["XCO2_star"]
-
-	alldataFrame = pandas.concat([thermoFrame, wtFrame, data], axis=1)
-
-	#Save this new data to an Excel spreadsheet
-	writer = pandas.ExcelWriter(filename + '_output.xlsx', engine='xlsxwriter') #Create a Pandas Excel writer using XlsxWriter as the engine.
-	data.to_excel(writer, sheet_name='Surface Gas Ratios')
-	thermoFrame.to_excel(writer, sheet_name='Thermo Data')
-	wtFrame.to_excel(writer, sheet_name='Petro Data')
-	alldataFrame.to_excel(writer, sheet_name='All Data')
-	writer.save() #Close the Pandas Excel writer and output the Excel file
-
-	#Do some plotting, if the user called for it
-	list_of_Xs = ['XCO', 'XCO2', 'XH2', 'XH2O', 'XH2S', 'XO2', 'XS2', 'XSO2']
-	if save_plots == True:
-		#Draw the figure
-		fig, ax = plt.subplots(4,4)
-
-		ax[0,1].set_title('Gas Ratio Visualizer')
-		divider = make_axes_locatable(ax[0,0])
-		
-		#SO2/CO2 versus everything:
-		XCO_SO2_CO2 = ax[0,0].plot(alldataFrame["XCO"], alldataFrame["ratio_SO2_CO2"], color='red', marker='.', linestyle='none')
-		XCO2_SO2_CO2 = ax[0,1].plot(alldataFrame["XCO2"], alldataFrame["ratio_SO2_CO2"], color='red', marker='.', linestyle='none')
-		XH2_SO2_CO2 = ax[0,2].plot(alldataFrame["XH2"], alldataFrame["ratio_SO2_CO2"], color='red', marker='.', linestyle='none')
-		XH2O_SO2_CO2 = ax[0,3].plot(alldataFrame["XH2O"], alldataFrame["ratio_SO2_CO2"], color='red', marker='.', linestyle='none')
-		XH2S_SO2_CO2 = ax[1,0].plot(alldataFrame["XH2S"], alldataFrame["ratio_SO2_CO2"], color='red', marker='.', linestyle='none')
-		XO2_SO2_CO2 = ax[1,1].plot(alldataFrame["XO2"], alldataFrame["ratio_SO2_CO2"], color='red', marker='.', linestyle='none')
-		XS2_SO2_CO2 = ax[1,2].plot(alldataFrame["XS2"], alldataFrame["ratio_SO2_CO2"], color='red', marker='.', linestyle='none')
-		XSO2_SO2_CO2 = ax[1,3].plot(alldataFrame["XSO2"], alldataFrame["ratio_SO2_CO2"], color='red', marker='.', linestyle='none')
-
-		#H2S/SO2 versus everything:
-		XCO_H2S_SO2 = ax[2,0].plot(alldataFrame["XCO"], alldataFrame["ratio_H2S_SO2"], color='blue', marker='.', linestyle='none')
-		XCO2_H2S_SO2 = ax[2,1].plot(alldataFrame["XCO2"], alldataFrame["ratio_H2S_SO2"], color='blue', marker='.', linestyle='none')
-		XH2_H2S_SO2 = ax[2,2].plot(alldataFrame["XH2"], alldataFrame["ratio_H2S_SO2"], color='blue', marker='.', linestyle='none')
-		XH2O_H2S_SO2 = ax[2,3].plot(alldataFrame["XH2O"], alldataFrame["ratio_H2S_SO2"], color='blue', marker='.', linestyle='none')
-		XH2S_H2S_SO2 = ax[3,0].plot(alldataFrame["XH2S"], alldataFrame["ratio_H2S_SO2"], color='blue', marker='.', linestyle='none')
-		XO2_H2S_SO2 = ax[3,1].plot(alldataFrame["XO2"], alldataFrame["ratio_H2S_SO2"], color='blue', marker='.', linestyle='none')
-		XS2_H2S_SO2 = ax[3,2].plot(alldataFrame["XS2"], alldataFrame["ratio_H2S_SO2"], color='blue', marker='.', linestyle='none')
-		XSO2_H2S_SO2 = ax[3,3].plot(alldataFrame["XSO2"], alldataFrame["ratio_H2S_SO2"], color='blue', marker='.', linestyle='none')
-
-		#add horizontal lines to represent measured values
-		SO2_CO2_min = eruption_SO2_CO2-eruption_SO2_CO2_range
-		SO2_CO2_max = eruption_SO2_CO2+eruption_SO2_CO2_range
-		H2S_SO2_min = eruption_H2S_SO2-eruption_H2S_SO2_range
-		H2S_SO2_max = eruption_H2S_SO2+eruption_H2S_SO2_range
-
-		#q values represent maximum and minimum values read in from GasData excel file (stored in GasData DataFrame)
-		q_SO2_CO2_min = minvalgasdata1 
-		q_SO2_CO2_max = maxvalgasdata1
-		q_H2S_SO2_min = minvalgasdata2
-		q_H2S_SO2_max = maxvalgasdata2
-
-		for X in range(4):
-			ax[0,X].axhspan(SO2_CO2_min, SO2_CO2_max, alpha=1, color='orange')
-			ax[1,X].axhspan(SO2_CO2_min, SO2_CO2_max, alpha=1, color='orange')
-			ax[2,X].axhspan(H2S_SO2_min, H2S_SO2_max, alpha=1, color='orange')
-			ax[3,X].axhspan(H2S_SO2_min, H2S_SO2_max, alpha=1, color='orange')
-
-			ax[0,X].axhspan(q_SO2_CO2_min, q_SO2_CO2_max, alpha=0.6, color='green')
-			ax[1,X].axhspan(q_SO2_CO2_min, q_SO2_CO2_max, alpha=0.6, color='green')
-			ax[2,X].axhspan(q_H2S_SO2_min, q_H2S_SO2_max, alpha=0.6, color='green')
-			ax[3,X].axhspan(q_H2S_SO2_min, q_H2S_SO2_max, alpha=0.6, color='green')
-
-
-		#Set labels for each subplot
-		for i in range(4):
-			ax[0,i].set_xlabel(list_of_Xs[i])
-			ax[0,i].set_ylabel('SO2/CO2')
-
-			ax[1,i].set_xlabel(list_of_Xs[i+4])
-			ax[1,i].set_ylabel('SO2/CO2')
-
-			ax[2,i].set_xlabel(list_of_Xs[i])
-			ax[2,i].set_ylabel('H2S/SO2')
-
-			ax[3,i].set_xlabel(list_of_Xs[i+4])
-			ax[3,i].set_ylabel('H2S/SO2')
-
-		#show the plot
-		plt.show()
-
-		#Second plot comparing calculated gas ratios to petrology (MI H2O, CO2, S wt percents) 
-		fig2, ax2 = plt.subplots(2,3)
-
-		ax2[0,2].set_title('Gas Ratios vs MI Petrology')
-		divider2 = make_axes_locatable(ax2[0,0])
-
-		#SO2/CO2 versus everything:
-		wtH2O_SO2_CO2 = ax2[0,0].plot(alldataFrame["H2O"], alldataFrame["ratio_SO2_CO2"], color='red', marker='.', linestyle='none')
-		wtCO2_SO2_CO2 = ax2[0,1].plot(alldataFrame["CO2"], alldataFrame["ratio_SO2_CO2"], color='red', marker='.', linestyle='none')
-		wtS_SO2_CO2 = ax2[0,2].plot(alldataFrame["S"], alldataFrame["ratio_SO2_CO2"], color='red', marker='.', linestyle='none')
-
-		#H2S/SO2 versus everything:
-		wtH2O_H2S_SO2 = ax2[1,0].plot(alldataFrame["H2O"], alldataFrame["ratio_H2S_SO2"], color='blue', marker='.', linestyle='none')
-		wtCO2_H2S_SO2 = ax2[1,1].plot(alldataFrame["CO2"], alldataFrame["ratio_H2S_SO2"], color='blue', marker='.', linestyle='none')
-		wtS_H2S_SO2 = ax2[1,2].plot(alldataFrame["S"], alldataFrame["ratio_H2S_SO2"], color='blue', marker='.', linestyle='none')
-
-		#add horizontal lines to represent measured values
-		for X in range(3):
-			ax2[0,X].axhspan(SO2_CO2_min, SO2_CO2_max, alpha=1, color='orange')
-			ax2[1,X].axhspan(H2S_SO2_min, H2S_SO2_max, alpha=1, color='orange')
-
-			ax2[0,X].axhspan(q_SO2_CO2_min, q_SO2_CO2_max, alpha=0.6, color='green')
-			ax2[1,X].axhspan(q_H2S_SO2_min, q_H2S_SO2_max, alpha=0.6, color='green')
-
-		#Set labels for each subplot
-		list_of_vols = ["H2O", "CO2", "S"]
-		for i in range(3):
-			ax2[0,i].set_xlabel(list_of_vols[i])
-			ax2[0,i].set_ylabel('SO2/CO2')
-
-			ax2[1,i].set_xlabel(list_of_vols[i])
-			ax2[1,i].set_ylabel('H2S/SO2')
-
-		#show the plot
-		plt.show()
-
-
-		#make 100% stacked area chart to visualize mole fraction compositions
-		#copy the data dataframe and drop some columns...
-		data_area_plot = data.drop('X_Sum', axis=1) 
-		data_area_plot = data_area_plot.drop('ratio_H2S_SO2', axis=1)
-		data_area_plot = data_area_plot.drop('ratio_SO2_CO2', axis=1)
-		data_area_plot = data_area_plot.drop('ratio_SO2star_CO2star', axis=1)
-		data_area_plot = data_area_plot.drop('XSO2_star', axis=1)
-		data_area_plot = data_area_plot.drop('XCO2_star', axis=1)
-
-
-		# #sort by increasing CO2
-		# data_area_plot = data_area_plot.sort_values(["XCO2", "XH2O"], ascending=True)
-		
-		#plot
-		data_area_plot.plot.area()
-		plt.show()
-
-	print '\n'
-	print 'SUCCESS! Saved file ' + filename + '_output.xlsx'
-
-	######-------Import timeseries gas data and match to calculated values-------#####
-	#Trying new faster way with merge and reset_index...
-
-
-	# GasData = GasData.dropna()
-	# alldataFrame.dropna()
-	# fastMatch = pandas.merge_asof(alldataFrame, GasData, left_on=[['ratio_SO2_CO2']], right_on=[['SO2/CO2']], direction='nearest', tolerance=0.1, allow_exact_matches=False)
-	# fastMatch = GasData.merge(alldataFrame, how='outer', left_on = ['SO2/CO2'], right_on = ['ratio_SO2_CO2'], tolerance=0.1)
-	# fastMatch = fastMatch.dropna()
-
-	# print fastMatch
-
-	#Save this new data to an Excel spreadsheet
-	# writer = pandas.ExcelWriter(filename + '_fastMatch.xlsx', engine='xlsxwriter') #Create a Pandas Excel writer using XlsxWriter as the engine.
-	# fastMatch.to_excel(writer, sheet_name='Matches')
-	# writer.save() #Close the Pandas Excel writer and output the Excel file
-
-
-	#original, working, slow way...
-	#Determines which dissolved volatile concentrations are required to reproduce the timeseries data.
-	positiveMatch = pandas.DataFrame() #Empty dataframe that stores values only when a match is positive for both ratios
-	iternumber = 1
-	if MatchBoth == False:
-		for index1, row1 in GasData.iterrows():
-			print row1
-			print iternumber
 			iternumber += 1
-			for index, row in alldataFrame.iterrows():
-				matchH2S_SO2_min = row["ratio_H2S_SO2"] - tolerance * row["ratio_H2S_SO2"]
-				matchH2S_SO2_max = row["ratio_H2S_SO2"] + tolerance * row["ratio_H2S_SO2"]
-				matchSO2_CO2_min = row["ratio_SO2_CO2"] - tolerance * row["ratio_SO2_CO2"]
-				matchSO2_CO2_max = row["ratio_SO2_CO2"] + tolerance * row["ratio_SO2_CO2"]
+			print iternumber
 
-				if matchH2S_SO2_min <= row1["H2S/SO2"] <= matchH2S_SO2_max:
-					if minvalgasdata1 <= row["ratio_SO2_CO2"] <= maxvalgasdata1:
-						if minvalgasdata2 <= row["ratio_H2S_SO2"] <= maxvalgasdata2:
-							positiveMatch = positiveMatch.append({	"Time": row1["Time"], 
-																	"H2S/SO2": row1["H2S/SO2"],
-																	"H2Omelt": row["H2O"],
-																	"CO2melt": row["CO2"],
-																	"Smelt": row["S"]}, ignore_index=True)
+			MeltInclusion_deep_thermo["XCO2tot"] = DegassedMI_X["XCO2fl"] #volatiles must be done separately and nornmalized to volatiles-only
+			MeltInclusion_deep_thermo["XH2Otot"] = DegassedMI_X["XH2Ofl"]
+			MeltInclusion_deep_thermo["XStot"] = DegassedMI_X["XSfl"]
 
-				if matchSO2_CO2_min <= row1["SO2/CO2"] <= matchSO2_CO2_max:
-					if minvalgasdata1 <= row["ratio_SO2_CO2"] <= maxvalgasdata1:
-						if minvalgasdata2 <= row["ratio_H2S_SO2"] <= maxvalgasdata2:
-							positiveMatch = positiveMatch.append({	"Time": row1["Time"],
-																	"SO2/CO2": row1["SO2/CO2"],
-																	"H2Omelt": row["H2O"],
-																	"CO2melt": row["CO2"],
-																	"Smelt": row["S"]}, ignore_index=True)
+			#run the model.....
+			MeltInclusion_deep_thermo["dont_save_this_iteration"] = False
+			Normd_fluid = TheModel(MeltInclusion_deep_thermo) #THIS IS THE THERMODYNAMIC MODEL RUNNING#
+			if Normd_fluid is None:
+				if verbose_errors == True:
+					print "\n"
+					print "Verbose errors:"
+					print "Normd_fluid:"
+					print Normd_fluid
+					print "Thermo dict:"
+					print MeltInclusion_deep_thermo
+				else:
+					pass
+				raise ValueError, "Normd_fluid is None"
+			else:
+				pass
+			if MeltInclusion_deep_thermo["dont_save_this_iteration"] == False:
+				Normd_fluid["ratio_SO2_CO2"] = Normd_fluid["XSO2"] / Normd_fluid["XCO2"]
+				Normd_fluid["ratio_H2S_SO2"] = Normd_fluid["XH2S"] / Normd_fluid["XSO2"]
+
+				#save data externally to this loop
+				list_of_fluid_dicts.append(Normd_fluid)
+				MeltInclusion_deep_thermo["iternumber"] = iternumber
+				thermolist.append(MeltInclusion_deep_thermo)
+				wtlist.append(MeltComposition_deep_wt)
+
+			else:
+				pass
+
+thermoFrame = pandas.DataFrame(thermolist) 
+wtFrame = pandas.DataFrame(wtlist)
+data = pandas.DataFrame(list_of_fluid_dicts)
+
+#calculate all S as SO2 and all C as CO2
+data["XSO2_star"] = data["XSO2"] + data["XH2S"]
+data["XCO2_star"] = data["XCO2"] + data["XCO"] * (0.5) * 3
+data["ratio_SO2star_CO2star"] = data["XSO2_star"] / data["XCO2_star"]
+
+alldataFrame = pandas.concat([thermoFrame, wtFrame, data], axis=1)
+#alldataFrame.reset_index(drop=True, inplace=True)
+
+#Save this new data to an Excel spreadsheet
+writer = pandas.ExcelWriter(filename + '_output.xlsx', engine='xlsxwriter') #Create a Pandas Excel writer using XlsxWriter as the engine.
+data.to_excel(writer, sheet_name='Surface Gas Ratios')
+thermoFrame.to_excel(writer, sheet_name='Thermo Data')
+wtFrame.to_excel(writer, sheet_name='Petro Data')
+alldataFrame.to_excel(writer, sheet_name='All Data')
+writer.save() #Close the Pandas Excel writer and output the Excel file
+
+##----------------------- PLOTTING ----------------------##
+#Do some plotting, if the user called for it
+list_of_Xs = ['XCO', 'XCO2', 'XH2', 'XH2O', 'XH2S', 'XO2', 'XS2', 'XSO2']
+if save_plots == True:
+	#Draw the figure
+	fig, ax = plt.subplots(4,4)
+
+	ax[0,1].set_title('Gas Ratio Visualizer')
+	divider = make_axes_locatable(ax[0,0])
 	
-	if MatchBoth == True:
-		for index1, row1 in GasData.iterrows():
-			print row1
-			print iternumber
-			iternumber += 1
-			for index, row in alldataFrame.iterrows():
-				matchH2S_SO2_min = row["ratio_H2S_SO2"] - tolerance * row["ratio_H2S_SO2"]
-				matchH2S_SO2_max = row["ratio_H2S_SO2"] + tolerance * row["ratio_H2S_SO2"]
-				matchSO2_CO2_min = row["ratio_SO2_CO2"] - tolerance * row["ratio_SO2_CO2"]
-				matchSO2_CO2_max = row["ratio_SO2_CO2"] + tolerance * row["ratio_SO2_CO2"]
+	#SO2/CO2 versus everything:
+	XCO_SO2_CO2 = ax[0,0].plot(alldataFrame["XCO"], alldataFrame["ratio_SO2_CO2"], color='red', marker='.', linestyle='none')
+	XCO2_SO2_CO2 = ax[0,1].plot(alldataFrame["XCO2"], alldataFrame["ratio_SO2_CO2"], color='red', marker='.', linestyle='none')
+	XH2_SO2_CO2 = ax[0,2].plot(alldataFrame["XH2"], alldataFrame["ratio_SO2_CO2"], color='red', marker='.', linestyle='none')
+	XH2O_SO2_CO2 = ax[0,3].plot(alldataFrame["XH2O"], alldataFrame["ratio_SO2_CO2"], color='red', marker='.', linestyle='none')
+	XH2S_SO2_CO2 = ax[1,0].plot(alldataFrame["XH2S"], alldataFrame["ratio_SO2_CO2"], color='red', marker='.', linestyle='none')
+	XO2_SO2_CO2 = ax[1,1].plot(alldataFrame["XO2"], alldataFrame["ratio_SO2_CO2"], color='red', marker='.', linestyle='none')
+	XS2_SO2_CO2 = ax[1,2].plot(alldataFrame["XS2"], alldataFrame["ratio_SO2_CO2"], color='red', marker='.', linestyle='none')
+	XSO2_SO2_CO2 = ax[1,3].plot(alldataFrame["XSO2"], alldataFrame["ratio_SO2_CO2"], color='red', marker='.', linestyle='none')
 
-				if matchH2S_SO2_min <= row1["H2S/SO2"] <= matchH2S_SO2_max and matchSO2_CO2_min <= row1["SO2/CO2"] <= matchSO2_CO2_max:
-					if minvalgasdata1 <= row["ratio_SO2_CO2"] <= maxvalgasdata1 and minvalgasdata1 <= row["ratio_SO2_CO2"] <= maxvalgasdata1:
-						if minvalgasdata2 <= row["ratio_H2S_SO2"] <= maxvalgasdata2 and minvalgasdata2 <= row["ratio_H2S_SO2"] <= maxvalgasdata2:
-							positiveMatch = positiveMatch.append({	"Time": row1["Time"], 
-																	"H2S/SO2": row["ratio_H2S_SO2"],
-																	"SO2/CO2": row["ratio_SO2_CO2"],
-																	"H2Omelt": row["H2O"],
-																	"CO2melt": row["CO2"],
-																	"Smelt": row["S"]}, ignore_index=True)
-	print positiveMatch
+	#H2S/SO2 versus everything:
+	XCO_H2S_SO2 = ax[2,0].plot(alldataFrame["XCO"], alldataFrame["ratio_H2S_SO2"], color='blue', marker='.', linestyle='none')
+	XCO2_H2S_SO2 = ax[2,1].plot(alldataFrame["XCO2"], alldataFrame["ratio_H2S_SO2"], color='blue', marker='.', linestyle='none')
+	XH2_H2S_SO2 = ax[2,2].plot(alldataFrame["XH2"], alldataFrame["ratio_H2S_SO2"], color='blue', marker='.', linestyle='none')
+	XH2O_H2S_SO2 = ax[2,3].plot(alldataFrame["XH2O"], alldataFrame["ratio_H2S_SO2"], color='blue', marker='.', linestyle='none')
+	XH2S_H2S_SO2 = ax[3,0].plot(alldataFrame["XH2S"], alldataFrame["ratio_H2S_SO2"], color='blue', marker='.', linestyle='none')
+	XO2_H2S_SO2 = ax[3,1].plot(alldataFrame["XO2"], alldataFrame["ratio_H2S_SO2"], color='blue', marker='.', linestyle='none')
+	XS2_H2S_SO2 = ax[3,2].plot(alldataFrame["XS2"], alldataFrame["ratio_H2S_SO2"], color='blue', marker='.', linestyle='none')
+	XSO2_H2S_SO2 = ax[3,3].plot(alldataFrame["XSO2"], alldataFrame["ratio_H2S_SO2"], color='blue', marker='.', linestyle='none')
 
-	#Save this new data to an Excel spreadsheet
-	writer2 = pandas.ExcelWriter(filename + '_Match.xlsx', engine='xlsxwriter') #Create a Pandas Excel writer using XlsxWriter as the engine.
-	positiveMatch.to_excel(writer2, sheet_name='All Matches')
-	GasData.to_excel(writer2, sheet_name='Gas Data')
-	writer2.save() #Close the Pandas Excel writer and output the Excel file
+	#add horizontal lines to represent measured values
+	SO2_CO2_min = eruption_SO2_CO2-eruption_SO2_CO2_range
+	SO2_CO2_max = eruption_SO2_CO2+eruption_SO2_CO2_range
+	H2S_SO2_min = eruption_H2S_SO2-eruption_H2S_SO2_range
+	H2S_SO2_max = eruption_H2S_SO2+eruption_H2S_SO2_range
 
-	#plot user input gas data
-	# Two subplots, the axes array is 1-d
-	f, axarr = plt.subplots(2, sharex=True)
-	axarr[0].plot(GasData["Time"], GasData["SO2/CO2"], color='green', marker='.', linestyle='none')
-	axarr[0].plot(positiveMatch["Time"], positiveMatch["SO2/CO2"], color='yellow', marker='o', linestyle='none')
-	axarr[0].set_yscale('log')
-	axarr[0].set_title('Real Gas Data From Maarten')
-	axarr[1].plot(GasData["Time"], GasData["H2S/SO2"], color='blue', marker='.', linestyle='none')
-	axarr[1].plot(positiveMatch["Time"], positiveMatch["H2S/SO2"], color='yellow', marker='o', linestyle='none')
-	axarr[0].set_ylabel("SO2/CO2")
-	axarr[1].set_ylabel("H2S/SO2")
-	axarr[0].set_xlabel("Date")
+	#q values represent maximum and minimum values read in from GasData excel file (stored in GasData DataFrame)
+	q_SO2_CO2_min = minvalgasdata1 
+	q_SO2_CO2_max = maxvalgasdata1
+	q_H2S_SO2_min = minvalgasdata2
+	q_H2S_SO2_max = maxvalgasdata2
 
-	#show the plots
+	for X in range(4):
+		ax[0,X].axhspan(SO2_CO2_min, SO2_CO2_max, alpha=1, color='orange')
+		ax[1,X].axhspan(SO2_CO2_min, SO2_CO2_max, alpha=1, color='orange')
+		ax[2,X].axhspan(H2S_SO2_min, H2S_SO2_max, alpha=1, color='orange')
+		ax[3,X].axhspan(H2S_SO2_min, H2S_SO2_max, alpha=1, color='orange')
+
+		ax[0,X].axhspan(q_SO2_CO2_min, q_SO2_CO2_max, alpha=0.6, color='green')
+		ax[1,X].axhspan(q_SO2_CO2_min, q_SO2_CO2_max, alpha=0.6, color='green')
+		ax[2,X].axhspan(q_H2S_SO2_min, q_H2S_SO2_max, alpha=0.6, color='green')
+		ax[3,X].axhspan(q_H2S_SO2_min, q_H2S_SO2_max, alpha=0.6, color='green')
+
+
+	#Set labels for each subplot
+	for i in range(4):
+		ax[0,i].set_xlabel(list_of_Xs[i])
+		ax[0,i].set_ylabel('SO2/CO2')
+
+		ax[1,i].set_xlabel(list_of_Xs[i+4])
+		ax[1,i].set_ylabel('SO2/CO2')
+
+		ax[2,i].set_xlabel(list_of_Xs[i])
+		ax[2,i].set_ylabel('H2S/SO2')
+
+		ax[3,i].set_xlabel(list_of_Xs[i+4])
+		ax[3,i].set_ylabel('H2S/SO2')
+
+	#show the plot
+	plt.show()
+
+	#Second plot comparing calculated gas ratios to petrology (MI H2O, CO2, S wt percents) 
+	fig2, ax2 = plt.subplots(2,3)
+
+	ax2[0,2].set_title('Gas Ratios vs MI Petrology')
+	divider2 = make_axes_locatable(ax2[0,0])
+
+	#SO2/CO2 versus everything:
+	wtH2O_SO2_CO2 = ax2[0,0].plot(alldataFrame["H2O"], alldataFrame["ratio_SO2_CO2"], color='red', marker='.', linestyle='none')
+	wtCO2_SO2_CO2 = ax2[0,1].plot(alldataFrame["CO2"], alldataFrame["ratio_SO2_CO2"], color='red', marker='.', linestyle='none')
+	wtS_SO2_CO2 = ax2[0,2].plot(alldataFrame["S"], alldataFrame["ratio_SO2_CO2"], color='red', marker='.', linestyle='none')
+
+	#H2S/SO2 versus everything:
+	wtH2O_H2S_SO2 = ax2[1,0].plot(alldataFrame["H2O"], alldataFrame["ratio_H2S_SO2"], color='blue', marker='.', linestyle='none')
+	wtCO2_H2S_SO2 = ax2[1,1].plot(alldataFrame["CO2"], alldataFrame["ratio_H2S_SO2"], color='blue', marker='.', linestyle='none')
+	wtS_H2S_SO2 = ax2[1,2].plot(alldataFrame["S"], alldataFrame["ratio_H2S_SO2"], color='blue', marker='.', linestyle='none')
+
+	#add horizontal lines to represent measured values
+	for X in range(3):
+		ax2[0,X].axhspan(SO2_CO2_min, SO2_CO2_max, alpha=1, color='orange')
+		ax2[1,X].axhspan(H2S_SO2_min, H2S_SO2_max, alpha=1, color='orange')
+
+		ax2[0,X].axhspan(q_SO2_CO2_min, q_SO2_CO2_max, alpha=0.6, color='green')
+		ax2[1,X].axhspan(q_H2S_SO2_min, q_H2S_SO2_max, alpha=0.6, color='green')
+
+	#Set labels for each subplot
+	list_of_vols = ["H2O", "CO2", "S"]
+	for i in range(3):
+		ax2[0,i].set_xlabel(list_of_vols[i])
+		ax2[0,i].set_ylabel('SO2/CO2')
+
+		ax2[1,i].set_xlabel(list_of_vols[i])
+		ax2[1,i].set_ylabel('H2S/SO2')
+
+	#show the plot
 	plt.show()
 
 
+	#make 100% stacked area chart to visualize mole fraction compositions
+	#copy the data dataframe and drop some columns...
+	data_area_plot = data.drop('X_Sum', axis=1) 
+	data_area_plot = data_area_plot.drop('ratio_H2S_SO2', axis=1)
+	data_area_plot = data_area_plot.drop('ratio_SO2_CO2', axis=1)
+	data_area_plot = data_area_plot.drop('ratio_SO2star_CO2star', axis=1)
+	data_area_plot = data_area_plot.drop('XSO2_star', axis=1)
+	data_area_plot = data_area_plot.drop('XCO2_star', axis=1)
 
+
+	# #sort by increasing CO2
+	# data_area_plot = data_area_plot.sort_values(["XCO2", "XH2O"], ascending=True)
+	
+	#plot
+	data_area_plot.plot.area()
+	plt.show()
+
+print '\n'
+print 'SUCCESS! Saved file ' + filename + '_output.xlsx'
+
+######-------Import timeseries gas data and match to calculated values-------#####
+#Determines which dissolved volatile concentrations are required to reproduce the timeseries data.
+positiveMatch = pandas.DataFrame() #Empty dataframe that stores values only when a match is positive for both ratios
+alldataFormatch = pandas.DataFrame()
+iternumber = 1
+if MatchBoth == False:
+	#Create new columns with min and max match data
+	#iterating over iterrows is SLOW, so you need to pull the data out into lists and iterate over data in memory
+	alldataFrame["matchH2S_SO2_min"] = alldataFrame["ratio_H2S_SO2"] - tolerance * alldataFrame["ratio_H2S_SO2"]
+	alldataFrame["matchH2S_SO2_max"] = alldataFrame["ratio_H2S_SO2"] + tolerance * alldataFrame["ratio_H2S_SO2"]
+	alldataFrame["matchSO2_CO2_min"] = alldataFrame["ratio_SO2_CO2"] - tolerance * alldataFrame["ratio_SO2_CO2"]
+	alldataFrame["matchSO2_CO2_max"] = alldataFrame["ratio_SO2_CO2"] + tolerance * alldataFrame["ratio_SO2_CO2"]
+
+	#make lists
+	matchH2S_SO2_min_list = alldataFrame["matchH2S_SO2_min"].tolist()
+	matchH2S_SO2_max_list = alldataFrame["matchH2S_SO2_max"].tolist()
+	matchSO2_CO2_min_list = alldataFrame["matchSO2_CO2_min"].tolist()
+	matchSO2_CO2_max_list = alldataFrame["matchSO2_CO2_max"].tolist()
+
+	ratio_H2S_SO2_list = alldataFrame["ratio_H2S_SO2"].tolist()
+	ratio_SO2_CO2_list = alldataFrame["ratio_SO2_CO2"].tolist()
+
+	data_H2S_SO2_list = GasData["H2S/SO2"].tolist()
+	data_SO2_CO2_list = GasData["SO2/CO2"].tolist()
+
+	for i in range(len(data_H2S_SO2_list)):
+		print "Row Number: " + str(iternumber) + " of " + str(len(data_H2S_SO2_list))
+		iternumber += 1
+		for j in range(len(matchH2S_SO2_min_list)):
+			if matchH2S_SO2_min_list[j] <= data_H2S_SO2_list[i] <= matchH2S_SO2_max_list[j]: 
+				if minvalgasdata1 <= ratio_SO2_CO2_list[i] <= maxvalgasdata1:
+					if minvalgasdata2 <= ratio_H2S_SO2_list[i] <= maxvalgasdata2:
+						positiveMatch = positiveMatch.append({	"Time": GasData.iloc[i]["Time"], 
+																"H2S/SO2": alldataFrame.iloc[j]["ratio_H2S_SO2"],
+																"SO2/CO2": alldataFrame.iloc[j]["ratio_SO2_CO2"],
+																"H2Omelt": alldataFrame.iloc[j]["H2O"],
+																"CO2melt": alldataFrame.iloc[j]["CO2"],
+																"Smelt": alldataFrame.iloc[j]["S"]}, ignore_index=True)
+						alldataFormatch = alldataFormatch.append(row)
+
+			if matchSO2_CO2_min_list[j] <= data_SO2_CO2_list[i] <= matchSO2_CO2_max_list[j]:
+				if minvalgasdata1 <= ratio_SO2_CO2_list[i] <= maxvalgasdata1:
+					if minvalgasdata2 <= ratio_H2S_SO2_list[i] <= maxvalgasdata2:
+						positiveMatch = positiveMatch.append({	"Time": GasData.iloc[i]["Time"], 
+																"H2S/SO2": alldataFrame.iloc[j]["ratio_H2S_SO2"],
+																"SO2/CO2": alldataFrame.iloc[j]["ratio_SO2_CO2"],
+																"H2Omelt": alldataFrame.iloc[j]["H2O"],
+																"CO2melt": alldataFrame.iloc[j]["CO2"],
+																"Smelt": alldataFrame.iloc[j]["S"]}, ignore_index=True)
+						print row
+						alldataFormatch = alldataFormatch.append(row)
+
+if MatchBoth == True:
+	#Create new columns with min and max match data
+	#iterating over iterrows is SLOW, so you need to pull the data out into lists and iterate over data in memory
+	alldataFrame["matchH2S_SO2_min"] = alldataFrame["ratio_H2S_SO2"] - tolerance * alldataFrame["ratio_H2S_SO2"]
+	alldataFrame["matchH2S_SO2_max"] = alldataFrame["ratio_H2S_SO2"] + tolerance * alldataFrame["ratio_H2S_SO2"]
+	alldataFrame["matchSO2_CO2_min"] = alldataFrame["ratio_SO2_CO2"] - tolerance * alldataFrame["ratio_SO2_CO2"]
+	alldataFrame["matchSO2_CO2_max"] = alldataFrame["ratio_SO2_CO2"] + tolerance * alldataFrame["ratio_SO2_CO2"]
+
+	#make lists
+	matchH2S_SO2_min_list = alldataFrame["matchH2S_SO2_min"].tolist()
+	matchH2S_SO2_max_list = alldataFrame["matchH2S_SO2_max"].tolist()
+	matchSO2_CO2_min_list = alldataFrame["matchSO2_CO2_min"].tolist()
+	matchSO2_CO2_max_list = alldataFrame["matchSO2_CO2_max"].tolist()
+
+	ratio_H2S_SO2_list = alldataFrame["ratio_H2S_SO2"].tolist()
+	ratio_SO2_CO2_list = alldataFrame["ratio_SO2_CO2"].tolist()
+
+	data_H2S_SO2_list = GasData["H2S/SO2"].tolist()
+	data_SO2_CO2_list = GasData["SO2/CO2"].tolist()
+
+	for i in range(len(data_H2S_SO2_list)):
+		print "Row Number: " + str(iternumber) + " of " + str(len(data_H2S_SO2_list))
+		iternumber += 1
+		for j in range(len(matchH2S_SO2_min_list)):
+			if matchH2S_SO2_min_list[j] <= data_H2S_SO2_list[i] <= matchH2S_SO2_max_list[j] and matchSO2_CO2_min_list[j] <= data_SO2_CO2_list[i] <= matchSO2_CO2_max_list[j]:
+				if minvalgasdata1 <= ratio_SO2_CO2_list[i] <= maxvalgasdata1:
+					if minvalgasdata2 <= ratio_H2S_SO2_list[i] <= maxvalgasdata2:
+						positiveMatch = positiveMatch.append({	"Time": GasData.iloc[i]["Time"], 
+																"H2S/SO2": alldataFrame.iloc[j]["ratio_H2S_SO2"],
+																"SO2/CO2": alldataFrame.iloc[j]["ratio_SO2_CO2"],
+																"H2Omelt": alldataFrame.iloc[j]["H2O"],
+																"CO2melt": alldataFrame.iloc[j]["CO2"],
+																"Smelt": alldataFrame.iloc[j]["S"]}, ignore_index=True)
+						alldataFormatch = alldataFormatch.append({	"XH2Otot": alldataFrame.iloc[j]["XH2Otot"],
+																	"XStot": alldataFrame.iloc[j]["XStot"],
+																	"XCO2tot": alldataFrame.iloc[j]["XCO2tot"],
+																	"press": alldataFrame.iloc[j]["press"],
+																	"temp": alldataFrame.iloc[j]["temp"],
+																	"tempK": alldataFrame.iloc[j]["tempK"]}, ignore_index=True)
+print positiveMatch
+
+#Save this new data to an Excel spreadsheet
+writer2 = pandas.ExcelWriter(filename + '_Match.xlsx', engine='xlsxwriter') #Create a Pandas Excel writer using XlsxWriter as the engine.
+positiveMatch.to_excel(writer2, sheet_name='All Matches')
+GasData.to_excel(writer2, sheet_name='Gas Data')
+alldataFormatch.to_excel(writer2, sheet_name='All Data')
+writer2.save() #Close the Pandas Excel writer and output the Excel file
+
+#plot user input gas data
+# Two subplots, the axes array is 1-d
+f, axarr = plt.subplots(6, sharex=True)
+axarr[1].plot(GasData["Time"], GasData["SO2/CO2"], color='green', marker='.', linestyle='none')
+axarr[1].plot(positiveMatch["Time"], positiveMatch["SO2/CO2"], color='yellow', marker='o', linestyle='none')
+
+
+axarr[2].plot(GasData["Time"], GasData["H2S/SO2"], color='blue', marker='.', linestyle='none')
+axarr[2].plot(positiveMatch["Time"], positiveMatch["H2S/SO2"], color='yellow', marker='o', linestyle='none')
+
+axarr[3].plot(positiveMatch["Time"], positiveMatch["H2Omelt"], color='blue', marker='.', linestyle='none')
+
+axarr[4].plot(positiveMatch["Time"], positiveMatch["CO2melt"], color='red', marker='.', linestyle='none')
+
+axarr[5].plot(positiveMatch["Time"], positiveMatch["Smelt"], color='chocolate', marker='.', linestyle='none')
+
+axarr[1].set_yscale('log')
+axarr[0].set_title('Real Gas Data From Maarten')
+axarr[1].set_ylabel("SO2/CO2")
+axarr[2].set_ylabel("H2S/SO2")
+axarr[3].set_ylabel("H2Omelt")
+axarr[4].set_ylabel("CO2melt")
+axarr[5].set_ylabel("Smelt")
+axarr[5].set_xlabel("Date")
+
+textstr_seq = ("tolerance = " + str(tolerance), 
+			   "H2O = " + str(minH2O) + '-' + str(maxH2O),
+			   "CO2 = " + str(minCO2) + '-' + str(maxCO2),
+			   "S = " + str(minS) + '-' + str(maxS),
+			   "fO2 = QFM+" +str(dQFMvalue)) 
+
+textstr = '\n'.join(textstr_seq)
+
+# place a text box in upper left in axes coords
+axarr[0].text(0.05, 0.95, textstr, transform=axarr[0].transAxes, fontsize=8,
+    	verticalalignment='top')
+
+#remove ticks from 0th axes, since that is just for displaying information
+axarr[0].tick_params(
+    axis='both',          # changes apply to both axes
+    which='both',      # both major and minor ticks are affected
+    bottom=False,      # ticks along the bottom edge are off
+    top=False,         # ticks along the top edge are off
+    left=False,
+    right=False,
+    labelbottom=False, # labels along the bottom edge are off
+	labelleft=False)
+
+#show the plots
+plt.show()
